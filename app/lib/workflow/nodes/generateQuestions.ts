@@ -13,8 +13,8 @@ const QuestionsSchema = z.object({
       z.object({
         question: z.string().describe("The question text"),
         options: z
-          .tuple([z.string(), z.string(), z.string(), z.string()])
-          .describe("Exactly 4 answer options"),
+          .array(z.string())
+          .describe("Array of exactly 4 answer options: [optionA, optionB, optionC, optionD]"),
         correctIndex: z
           .number()
           .min(0)
@@ -22,10 +22,10 @@ const QuestionsSchema = z.object({
           .describe("0-based index of the correct option (0=A, 1=B, 2=C, 3=D)"),
       })
     )
-    .describe(`Exactly ${MCQ_COUNT} multiple-choice questions`),
+    .describe(`Array of exactly ${MCQ_COUNT} multiple-choice questions`),
   descriptiveQuestions: z
     .array(z.string())
-    .describe(`Exactly ${DESC_COUNT} open-ended descriptive questions`),
+    .describe(`Array of exactly ${DESC_COUNT} open-ended descriptive questions`),
 });
 
 export async function generateQuestionsNode(
@@ -74,20 +74,25 @@ export async function generateQuestionsNode(
       ),
     ]);
 
-    if (result.mcqQuestions.length < MCQ_COUNT) {
-      return { error: `AI generated only ${result.mcqQuestions.length}/${MCQ_COUNT} MCQ questions. Please try again.` };
-    }
     if (result.descriptiveQuestions.length < DESC_COUNT) {
       return { error: `AI generated only ${result.descriptiveQuestions.length}/${DESC_COUNT} descriptive questions. Please try again.` };
     }
 
+    const validMcq = result.mcqQuestions
+      .filter((q) => Array.isArray(q.options) && q.options.length >= 4)
+      .slice(0, MCQ_COUNT);
+
+    if (validMcq.length < MCQ_COUNT) {
+      return { error: `AI generated only ${validMcq.length}/${MCQ_COUNT} valid MCQ questions. Please try again.` };
+    }
+
     const questions: ScreeningQuestion[] = [
-      ...result.mcqQuestions.slice(0, MCQ_COUNT).map(
+      ...validMcq.map(
         (q): ScreeningQuestion => ({
           type: "mcq",
           text: q.question.trim(),
-          options: q.options as [string, string, string, string],
-          correctIndex: q.correctIndex,
+          options: q.options.slice(0, 4) as [string, string, string, string],
+          correctIndex: Math.min(q.correctIndex, 3),
         })
       ),
       ...result.descriptiveQuestions.slice(0, DESC_COUNT).map(
