@@ -13,6 +13,15 @@ export interface ICandidate extends Document {
   resumeData?: Buffer;
   resumeFilename?: string;
   resumeContentType?: string;
+  screeningQuestions?: string[];
+  screeningAnswers?: string[];
+  resumeMatchScore?: number;
+  resumeMatchReason?: string;
+  screeningTimeLimitSeconds?: number;
+  answerScore?: number;
+  questionScores?: number[];
+  questionFeedback?: string[];
+  overallFeedback?: string;
   appliedAt?: Date;
   notes?: string;
   createdAt: Date;
@@ -41,6 +50,15 @@ const CandidateSchema = new Schema<ICandidate>(
     resumeData: { type: Buffer },
     resumeFilename: { type: String },
     resumeContentType: { type: String },
+    screeningQuestions: [{ type: String }],
+    screeningAnswers: [{ type: String }],
+    resumeMatchScore: { type: Number },
+    resumeMatchReason: { type: String },
+    screeningTimeLimitSeconds: { type: Number },
+    answerScore: { type: Number },
+    questionScores: [{ type: Number }],
+    questionFeedback: [{ type: String }],
+    overallFeedback: { type: String },
     appliedAt: { type: Date, default: Date.now },
     notes: { type: String },
   },

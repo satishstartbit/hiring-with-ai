@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { createLLM } from "../../groq";
+import { createLLM, getGroqErrorMessage } from "../../groq";
 import type { HiringState } from "../state";
 
 const AnalysisSchema = z.object({
@@ -36,7 +36,7 @@ export async function analyzeRequestNode(
         `Analyze this hiring request and extract structured information:\n\n"${state.userRequest}"`
       ),
     ]);
-
+    console.log("Analysis result:", result);
     return {
       role: result.role,
       department: result.department,
@@ -46,15 +46,17 @@ export async function analyzeRequestNode(
       steps: steps.map((s) =>
         s.name === "Analyze Request"
           ? {
-              ...s,
-              status: "completed" as const,
-              output: `${result.role} · ${result.department}`,
-            }
+            ...s,
+            status: "completed" as const,
+            output: `${result.role} · ${result.department}`,
+          }
           : s
       ),
     };
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
+
+    console.log("Error in analyzeRequestNode:", err);
+    const error = getGroqErrorMessage(err);
     return {
       error,
       steps: steps.map((s) =>

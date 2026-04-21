@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-
+    console.log("Received user request:", userRequest);
     const result = await runHiringWorkflow(userRequest.trim());
 
     return Response.json({
@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
       ...result,
     });
   } catch (err) {
+    console.error("Error in POST /hiring:", err);
     const message = err instanceof Error ? err.message : "Internal server error";
     return Response.json({ error: message }, { status: 500 });
   }

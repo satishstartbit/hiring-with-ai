@@ -8,7 +8,7 @@ export async function GET() {
     await connectDB();
     const workflows = await WorkflowRun.find()
       .sort({ createdAt: -1 })
-      .limit(20)
+      .limit(10)
       .lean();
     return Response.json({ workflows });
   } catch (err) {

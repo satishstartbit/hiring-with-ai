@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { createLLM } from "../../groq";
+import { createLLM, getGroqErrorMessage } from "../../groq";
+import { webSearch } from "../../tavily";
 import type { HiringState } from "../state";
 
 const JDSchema = z.object({
@@ -22,14 +23,23 @@ export async function generateJobDescriptionNode(
   );
 
   try {
+    const marketContext = await webSearch(
+      `${state.role} ${state.jobType} job description skills requirements 2024`,
+      4
+    );
+
     const llm = createLLM();
     const structured = llm.withStructuredOutput(JDSchema, {
       name: "generate_job_description",
     });
 
+    const marketSection = marketContext
+      ? `\n\nCurrent market context (use to write an accurate, realistic JD):\n${marketContext}`
+      : "";
+
     const result = await structured.invoke([
       new SystemMessage(
-        "You are an expert technical recruiter who writes compelling, inclusive job descriptions."
+        "You are an expert technical recruiter who writes compelling, inclusive job descriptions. Use any market context provided to reflect current industry standards and realistic skill requirements."
       ),
       new HumanMessage(`Write a complete job description for the following role:
 
@@ -37,7 +47,7 @@ Role: ${state.role}
 Department: ${state.department}
 Location: ${state.location}
 Employment type: ${state.jobType}
-Key requirements: ${(state.requirements ?? []).join(", ")}`),
+Key requirements: ${(state.requirements ?? []).join(", ")}${marketSection}`),
     ]);
 
     return {
@@ -54,7 +64,7 @@ Key requirements: ${(state.requirements ?? []).join(", ")}`),
       ),
     };
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
+    const error = getGroqErrorMessage(err);
     return {
       error,
       steps: steps.map((s) =>

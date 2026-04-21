@@ -17,7 +17,7 @@ export async function trackCandidatesNode(
         ? {
             ...s,
             status: "completed" as const,
-            output: "Job is live — candidates can now apply",
+            output: "Job is live - candidates can now apply",
           }
         : s
     );

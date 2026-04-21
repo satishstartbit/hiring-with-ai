@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import ApplyModal from "./ApplyModal";
 
@@ -17,10 +18,10 @@ interface Job {
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  active: "bg-green-500/20 text-green-400 border-green-500/30",
-  draft: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  closed: "bg-gray-500/20 text-gray-400 border-gray-500/30",
-  filled: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  active: "bg-blue-50 text-blue-700 border-blue-200",
+  draft: "bg-slate-100 text-slate-700 border-slate-200",
+  closed: "bg-red-50 text-red-700 border-red-200",
+  filled: "bg-blue-50 text-blue-700 border-blue-200",
 };
 
 export default function JobCard({ job }: { readonly job: Job }) {
@@ -28,14 +29,14 @@ export default function JobCard({ job }: { readonly job: Job }) {
 
   return (
     <>
-      <div className="bg-gray-900 rounded-xl border border-gray-700 p-5 hover:border-gray-500 transition-colors flex flex-col">
-        <div className="flex items-start justify-between gap-3 mb-3">
+      <article className="flex h-full flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition-colors hover:border-blue-300">
+        <div className="mb-3 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="font-semibold text-white truncate">{job.title}</h3>
-            <p className="text-sm text-gray-400">{job.department}</p>
+            <h3 className="truncate font-bold text-slate-950">{job.title}</h3>
+            <p className="mt-1 text-sm text-slate-500">{job.department}</p>
           </div>
           <span
-            className={`shrink-0 text-xs font-medium px-2 py-1 rounded-full border ${
+            className={`shrink-0 rounded-md border px-2 py-1 text-xs font-bold ${
               STATUS_BADGE[job.status] || STATUS_BADGE.draft
             }`}
           >
@@ -43,26 +44,37 @@ export default function JobCard({ job }: { readonly job: Job }) {
           </span>
         </div>
 
-        <div className="flex flex-wrap gap-2 text-xs text-gray-500 mb-4">
-          <span>📍 {job.location}</span>
-          <span>⏱ {job.type}</span>
-          <span>👥 {job.applicantCount} applicants</span>
+        <div className="mb-4 flex flex-wrap gap-2 text-xs font-medium text-slate-500">
+          <span>{job.location}</span>
+          <span>/</span>
+          <span>{job.type}</span>
+          <span>/</span>
+          <span>{job.applicantCount} applicants</span>
         </div>
 
-        <div className="mt-auto flex items-center justify-between">
-          <span className="text-xs text-gray-600">
+        <div className="mt-auto flex items-center justify-between gap-3">
+          <span className="text-xs text-slate-500">
             {new Date(job.createdAt).toLocaleDateString()}
           </span>
-          {job.status === "active" && (
-            <button
-              onClick={() => setShowModal(true)}
-              className="text-xs font-medium px-3 py-1.5 bg-white text-gray-900 rounded-lg hover:bg-gray-100 transition-colors"
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/jobs/${job._id}`}
+              className="rounded-md border border-blue-200 px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-50"
             >
-              Apply →
-            </button>
-          )}
+              Details
+            </Link>
+            {job.status === "active" && (
+              <button
+                type="button"
+                onClick={() => setShowModal(true)}
+                className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-red-700"
+              >
+                Apply
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      </article>
 
       {showModal && (
         <ApplyModal

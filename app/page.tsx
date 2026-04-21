@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import WorkflowStatus from "./components/WorkflowStatus";
-import JobCard from "./components/JobCard";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import AnalyticsDashboard from "./components/AnalyticsDashboard";
+import WorkflowStatus from "./components/WorkflowStatus";
 
 interface WorkflowStep {
   name: string;
@@ -31,6 +31,18 @@ interface Job {
   createdAt: string;
 }
 
+interface Candidate {
+  _id: string;
+  name: string;
+  email: string;
+  currentTitle?: string;
+  currentCompany?: string;
+  jobTitle: string;
+  resumeFilename?: string;
+  appliedAt?: string;
+  createdAt: string;
+}
+
 interface Analytics {
   jobs: { total: number; active: number; filled: number };
   candidates: {
@@ -49,18 +61,19 @@ const EXAMPLE_REQUESTS = [
   "We need a Data Scientist with Python and ML background",
 ];
 
-export default function Home() {
+export default function Dashboard() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<WorkflowResult | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [activeTab, setActiveTab] = useState<"chat" | "jobs" | "analytics">("chat");
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    fetchJobs();
-    fetchAnalytics();
+    void fetchJobs();
+    void fetchAnalytics();
+    void fetchCandidates();
   }, []);
 
   async function fetchJobs() {
@@ -70,7 +83,18 @@ export default function Home() {
       const data = await res.json();
       setJobs(data.jobs || []);
     } catch {
-      // silently fail on initial load
+      // Dashboard data is best-effort on first load.
+    }
+  }
+
+  async function fetchCandidates() {
+    try {
+      const res = await fetch("/api/candidates");
+      if (!res.ok) return;
+      const data = await res.json();
+      setCandidates(data.candidates || []);
+    } catch {
+      // Dashboard data is best-effort on first load.
     }
   }
 
@@ -81,7 +105,7 @@ export default function Home() {
       const data = await res.json();
       setAnalytics(data);
     } catch {
-      // silently fail on initial load
+      // Dashboard data is best-effort on first load.
     }
   }
 
@@ -90,8 +114,6 @@ export default function Home() {
     if (!input.trim() || isLoading) return;
 
     setIsLoading(true);
-    setResult(null);
-
     setResult({
       success: false,
       workflowRunId: "",
@@ -115,20 +137,18 @@ export default function Home() {
 
       if (data.success) {
         setInput("");
-        fetchJobs();
-        fetchAnalytics();
-        setActiveTab("jobs");
+        await Promise.all([fetchJobs(), fetchAnalytics(), fetchCandidates()]);
       }
     } catch {
       setResult((prev) =>
         prev
           ? {
               ...prev,
-              error: "Network error — please try again",
-              steps: prev.steps.map((s) =>
-                s.status === "running"
-                  ? { ...s, status: "failed" as const, error: "Network error" }
-                  : s
+              error: "Network error - please try again",
+              steps: prev.steps.map((step) =>
+                step.status === "running"
+                  ? { ...step, status: "failed" as const, error: "Network error" }
+                  : step
               ),
             }
           : null
@@ -143,147 +163,244 @@ export default function Home() {
     inputRef.current?.focus();
   }
 
+  const resumeCount = candidates.filter((candidate) => candidate.resumeFilename).length;
+
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col">
-      {/* Header */}
-      <header className="border-b border-gray-800 px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-white">HireAI</h1>
-            <p className="text-xs text-gray-500">AI-Powered Hiring Automation</p>
+    <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:py-8">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-blue-700">Dashboard</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+            Hiring command center
+          </h1>
+          <p className="mt-1 max-w-2xl text-sm text-slate-600">
+            Create job positions, monitor applicants, and review submitted resumes.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Link
+            href="/jobs"
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            View Jobs
+          </Link>
+          <Link
+            href="/resumes"
+            className="rounded-md border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
+          >
+            View Resumes
+          </Link>
+        </div>
+      </div>
+
+      <section className="grid gap-4 md:grid-cols-4">
+        <SummaryCard label="Job Positions" value={jobs.length} accent="blue" />
+        <SummaryCard
+          label="Active Positions"
+          value={analytics?.jobs.active ?? 0}
+          accent="blue"
+        />
+        <SummaryCard label="Applications" value={candidates.length} accent="red" />
+        <SummaryCard label="Resumes Uploaded" value={resumeCount} accent="red" />
+      </section>
+
+      <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4">
+            <h2 className="text-lg font-bold text-slate-950">Create a job position</h2>
+            <p className="text-sm text-slate-600">
+              Describe the role and the workflow will analyze, write, and publish it.
+            </p>
           </div>
-          <nav className="flex gap-1">
-            {(["chat", "jobs", "analytics"] as const).map((tab) => (
+
+          <div className="mb-4 grid gap-2 sm:grid-cols-2">
+            {EXAMPLE_REQUESTS.map((example) => (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize ${
-                  activeTab === tab
-                    ? "bg-white text-gray-900"
-                    : "text-gray-400 hover:text-white hover:bg-gray-800"
-                }`}
+                key={example}
+                type="button"
+                onClick={() => handleExample(example)}
+                className="rounded-md border border-slate-200 bg-slate-50 p-3 text-left text-sm font-medium text-slate-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-800"
               >
-                {tab}
+                {example}
               </button>
             ))}
-          </nav>
-        </div>
-      </header>
-
-      <main className="flex-1 max-w-6xl mx-auto w-full px-6 py-8">
-        {/* Chat Tab */}
-        {activeTab === "chat" && (
-          <div className="max-w-2xl mx-auto space-y-6">
-            <div className="text-center space-y-2">
-              <h2 className="text-3xl font-bold">What role do you need to fill?</h2>
-              <p className="text-gray-400 text-sm">
-                Describe the position and the AI will generate a job description and
-                publish it — candidates apply directly on this site.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              {EXAMPLE_REQUESTS.map((ex, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleExample(ex)}
-                  className="text-left p-3 rounded-lg border border-gray-700 hover:border-gray-500 text-sm text-gray-300 hover:text-white transition-colors bg-gray-900/50 hover:bg-gray-800"
-                >
-                  {ex}
-                </button>
-              ))}
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    e.currentTarget.form?.requestSubmit();
-                  }
-                }}
-                placeholder="e.g. I need a Senior Backend Engineer who knows Go and AWS..."
-                rows={3}
-                className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-gray-500 resize-none text-sm"
-                disabled={isLoading}
-              />
-              <button
-                type="submit"
-                disabled={isLoading || !input.trim()}
-                className="w-full py-3 px-6 bg-white text-gray-900 font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100 transition-colors text-sm"
-              >
-                {isLoading ? "Running Workflow…" : "Start Hiring Workflow →"}
-              </button>
-            </form>
-
-            {result && (
-              <div className="space-y-4">
-                <WorkflowStatus steps={result.steps ?? []} isRunning={isLoading} />
-
-                {result.success && (
-                  <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 space-y-1">
-                    <p className="text-green-400 font-semibold text-sm">
-                      ✓ Job posted successfully
-                    </p>
-                    <p className="text-sm text-gray-400">
-                      The listing is live — candidates can apply from the Jobs tab.
-                    </p>
-                  </div>
-                )}
-
-                {result.error && !isLoading && (
-                  <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
-                    <p className="text-red-400 text-sm">✕ Error: {result.error}</p>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
-        )}
 
-        {/* Jobs Tab */}
-        {activeTab === "jobs" && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold">Job Postings</h2>
-              <span className="text-sm text-gray-500">{jobs.length} jobs</span>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  e.currentTarget.form?.requestSubmit();
+                }
+              }}
+              placeholder="Example: I need a Senior Backend Engineer who knows Go and AWS..."
+              rows={4}
+              className="w-full resize-none rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              disabled={isLoading}
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              className="w-full rounded-md bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {isLoading ? "Running workflow..." : "Start Hiring Workflow"}
+            </button>
+          </form>
+
+          {result && (
+            <div className="mt-5 space-y-4">
+              <WorkflowStatus steps={result.steps ?? []} isRunning={isLoading} />
+
+              {result.success && (
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-4">
+                  <p className="text-sm font-bold text-blue-800">
+                    Job posted successfully.
+                  </p>
+                  <p className="mt-1 text-sm text-blue-700">
+                    The listing is live on the Job Positions page.
+                  </p>
+                </div>
+              )}
+
+              {result.error && !isLoading && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-4">
+                  <p className="text-sm font-semibold text-red-700">
+                    Error: {result.error}
+                  </p>
+                </div>
+              )}
             </div>
-            {jobs.length === 0 ? (
-              <div className="text-center py-16 text-gray-500">
-                <p className="text-4xl mb-3">📋</p>
-                <p>No job postings yet.</p>
-                <button
-                  onClick={() => setActiveTab("chat")}
-                  className="mt-3 text-sm text-blue-400 hover:underline"
-                >
-                  Start a hiring workflow →
-                </button>
-              </div>
+          )}
+        </div>
+
+        <div className="space-y-6">
+          {analytics && <AnalyticsDashboard analytics={analytics} />}
+
+          <DashboardPanel
+            title="Recent job positions"
+            actionHref="/jobs"
+            actionLabel="All jobs"
+          >
+            {jobs.slice(0, 5).length === 0 ? (
+              <p className="py-6 text-sm text-slate-500">No positions have been created.</p>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {jobs.map((job) => (
-                  <JobCard key={job._id} job={job} />
+              <div className="divide-y divide-slate-100">
+                {jobs.slice(0, 5).map((job) => (
+                  <Link
+                    key={job._id}
+                    href={`/jobs/${job._id}`}
+                    className="block py-3 hover:bg-slate-50"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-slate-950">
+                          {job.title}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {job.department} / {job.location}
+                        </p>
+                      </div>
+                      <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-bold text-blue-700">
+                        {job.applicantCount} applicants
+                      </span>
+                    </div>
+                  </Link>
                 ))}
               </div>
             )}
-          </div>
-        )}
+          </DashboardPanel>
 
-        {/* Analytics Tab */}
-        {activeTab === "analytics" && (
-          <div className="max-w-2xl space-y-6">
-            <h2 className="text-xl font-bold">Analytics & Insights</h2>
-            {analytics ? (
-              <AnalyticsDashboard analytics={analytics} />
+          <DashboardPanel
+            title="Latest resumes"
+            actionHref="/resumes"
+            actionLabel="All resumes"
+          >
+            {candidates.slice(0, 5).length === 0 ? (
+              <p className="py-6 text-sm text-slate-500">No applications yet.</p>
             ) : (
-              <p className="text-gray-500">Loading analytics…</p>
+              <div className="divide-y divide-slate-100">
+                {candidates.slice(0, 5).map((candidate) => (
+                  <div key={candidate._id} className="py-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-slate-950">
+                          {candidate.name}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {candidate.email} / {candidate.jobTitle}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-md px-2 py-1 text-xs font-bold ${
+                          candidate.resumeFilename
+                            ? "bg-red-50 text-red-700"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {candidate.resumeFilename ? "Resume" : "No file"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
-          </div>
-        )}
-      </main>
+          </DashboardPanel>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: number;
+  accent: "blue" | "red";
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
+      <p
+        className={`mt-2 text-3xl font-bold ${
+          accent === "blue" ? "text-blue-700" : "text-red-700"
+        }`}
+      >
+        {value}
+      </p>
     </div>
+  );
+}
+
+function DashboardPanel({
+  title,
+  actionHref,
+  actionLabel,
+  children,
+}: {
+  title: string;
+  actionHref: string;
+  actionLabel: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 className="text-base font-bold text-slate-950">{title}</h2>
+        <Link
+          href={actionHref}
+          className="rounded-md px-2 py-1 text-xs font-bold text-blue-700 hover:bg-blue-50"
+        >
+          {actionLabel}
+        </Link>
+      </div>
+      {children}
+    </section>
   );
 }

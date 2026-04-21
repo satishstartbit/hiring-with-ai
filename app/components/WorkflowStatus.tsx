@@ -13,39 +13,39 @@ interface WorkflowStatusProps {
 }
 
 const STATUS_ICON: Record<WorkflowStep["status"], string> = {
-  pending: "○",
-  running: "◌",
-  completed: "●",
-  failed: "✕",
+  pending: "o",
+  running: "*",
+  completed: "done",
+  failed: "x",
 };
 
 const STATUS_COLOR: Record<WorkflowStep["status"], string> = {
-  pending: "text-gray-400",
-  running: "text-blue-500",
-  completed: "text-green-500",
-  failed: "text-red-500",
+  pending: "text-slate-400",
+  running: "text-blue-600",
+  completed: "text-blue-700",
+  failed: "text-red-600",
 };
 
 export default function WorkflowStatus({ steps, isRunning }: WorkflowStatusProps) {
   if (steps.length === 0) return null;
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-700 p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-center gap-2">
+        <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">
           Workflow Progress
         </h3>
         {isRunning && (
-          <span className="inline-flex items-center gap-1 text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full">
-            <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+          <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-700">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-600" />
             Running
           </span>
         )}
       </div>
 
       <ol className="space-y-3">
-        {steps.map((step, i) => (
-          <li key={i} className="flex items-start gap-3">
+        {steps.map((step, index) => (
+          <li key={`${step.name}-${index}`} className="flex items-start gap-3">
             <span
               className={`mt-0.5 text-base leading-none ${STATUS_COLOR[step.status]} ${
                 step.status === "running" ? "animate-spin" : ""
@@ -54,25 +54,27 @@ export default function WorkflowStatus({ steps, isRunning }: WorkflowStatusProps
             >
               {STATUS_ICON[step.status]}
             </span>
-            <div className="flex-1 min-w-0">
+            <div className="min-w-0 flex-1">
               <p
-                className={`text-sm font-medium ${
+                className={`text-sm font-semibold ${
                   step.status === "completed"
-                    ? "text-white"
+                    ? "text-slate-950"
                     : step.status === "running"
-                    ? "text-blue-300"
+                    ? "text-blue-700"
                     : step.status === "failed"
-                    ? "text-red-400"
-                    : "text-gray-500"
+                    ? "text-red-700"
+                    : "text-slate-500"
                 }`}
               >
                 {step.name}
               </p>
               {step.output && (
-                <p className="text-xs text-gray-400 mt-0.5 truncate">{step.output}</p>
+                <p className="mt-0.5 truncate text-xs text-slate-500">
+                  {step.output}
+                </p>
               )}
               {step.error && (
-                <p className="text-xs text-red-400 mt-0.5">{step.error}</p>
+                <p className="mt-0.5 text-xs text-red-700">{step.error}</p>
               )}
             </div>
           </li>

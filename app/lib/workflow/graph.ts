@@ -17,10 +17,23 @@ function routeOrStop(next: string) {
 
 // Wrap each node so intermediate step state is persisted to MongoDB after every step
 function withPersist(
+  stepName: string,
   fn: (state: HiringState) => Promise<Partial<HiringState>>
 ) {
   return async (state: HiringState): Promise<Partial<HiringState>> => {
+    console.log(`[Hiring Workflow] ${stepName} started`);
+
     const update = await fn(state);
+    const step = update.steps?.find((s) => s.name === stepName);
+
+    if (update.error || step?.status === "failed") {
+      console.error(
+        `[Hiring Workflow] ${stepName} failed: ${step?.error ?? update.error}`
+      );
+    } else if (step?.status === "completed") {
+      console.log(`[Hiring Workflow] ${stepName} completed`);
+    }
+
     if (state.workflowRunId && update.steps) {
       await WorkflowRun.findByIdAndUpdate(state.workflowRunId, {
         steps: update.steps,
@@ -32,10 +45,16 @@ function withPersist(
 
 // Build and compile the LangGraph StateGraph once
 const workflow = new StateGraph(HiringStateAnnotation)
-  .addNode("analyzeRequest", withPersist(analyzeRequestNode))
-  .addNode("generateJobDescription", withPersist(generateJobDescriptionNode))
-  .addNode("postJob", withPersist(postJobNode))
-  .addNode("openForApplications", withPersist(trackCandidatesNode))
+  .addNode("analyzeRequest", withPersist("Analyze Request", analyzeRequestNode))
+  .addNode(
+    "generateJobDescription",
+    withPersist("Generate Job Description", generateJobDescriptionNode)
+  )
+  .addNode("postJob", withPersist("Post Job", postJobNode))
+  .addNode(
+    "openForApplications",
+    withPersist("Open for Applications", trackCandidatesNode)
+  )
   .addEdge(START, "analyzeRequest")
   .addConditionalEdges("analyzeRequest", routeOrStop("generateJobDescription"))
   .addConditionalEdges("generateJobDescription", routeOrStop("postJob"))

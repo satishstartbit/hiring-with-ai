@@ -3,6 +3,9 @@ import mongoose from "mongoose";
 import { connectDB } from "../../../../lib/db/connection";
 import Job from "../../../../lib/db/models/Job";
 import Candidate from "../../../../lib/db/models/Candidate";
+import { runGradingWorkflow } from "../../../../lib/workflow/gradingGraph";
+import type { ScreeningQuestion } from "../../../../lib/workflow/screeningState";
+import { sendScreeningResultEmail } from "../../../../lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -33,21 +36,28 @@ export async function POST(
     const currentTitle = (formData.get("currentTitle") as string | null)?.trim();
     const currentCompany = (formData.get("currentCompany") as string | null)?.trim();
     const resumeFile = formData.get("resume") as File | null;
+    const screeningQuestionsRaw = formData.get("screeningQuestions") as string | null;
+    const screeningAnswersRaw = formData.get("screeningAnswers") as string | null;
+    const resumeMatchScoreRaw = formData.get("resumeMatchScore") as string | null;
+    const resumeMatchReason = (formData.get("resumeMatchReason") as string | null)?.trim();
+    const screeningTimeLimitRaw = formData.get("screeningTimeLimitSeconds") as string | null;
 
     if (!name || !email) {
       return Response.json({ error: "Name and email are required" }, { status: 400 });
     }
+    if (!screeningQuestionsRaw || !screeningAnswersRaw) {
+      return Response.json({ error: "AI screening must be completed before applying" }, { status: 400 });
+    }
 
-    // Check for duplicate application
     const existing = await Candidate.findOne({ jobId: id, email });
     if (existing) {
       return Response.json({ error: "You have already applied for this position" }, { status: 409 });
     }
 
+    // Parse resume
     let resumeData: Buffer | undefined;
     let resumeFilename: string | undefined;
     let resumeContentType: string | undefined;
-
     if (resumeFile && resumeFile.size > 0) {
       if (resumeFile.size > 5 * 1024 * 1024) {
         return Response.json({ error: "Resume must be under 5 MB" }, { status: 400 });
@@ -56,6 +66,30 @@ export async function POST(
       resumeFilename = resumeFile.name;
       resumeContentType = resumeFile.type;
     }
+
+    // Parse screening Q&A
+    let questions: ScreeningQuestion[] = [];
+    let answers: string[] = [];
+    try {
+      const pq = JSON.parse(screeningQuestionsRaw);
+      const pa = JSON.parse(screeningAnswersRaw);
+      if (Array.isArray(pq) && Array.isArray(pa)) {
+        questions = pq.slice(0, 25) as ScreeningQuestion[];
+        answers = pa.filter((a) => typeof a === "string").slice(0, 25);
+      }
+    } catch {
+      return Response.json({ error: "Invalid screening answer payload" }, { status: 400 });
+    }
+
+    if (questions.length === 0 || answers.length === 0) {
+      return Response.json({ error: "Screening questions must be answered before applying" }, { status: 400 });
+    }
+
+    const resumeMatchScore = resumeMatchScoreRaw ? Number.parseInt(resumeMatchScoreRaw, 10) : undefined;
+    const screeningTimeLimitSeconds = screeningTimeLimitRaw ? Number.parseInt(screeningTimeLimitRaw, 10) : undefined;
+
+    // Store the question texts for the DB (strip correctIndex before saving)
+    const screeningQuestionsForDb = questions.map((q) => q.text);
 
     const candidate = await Candidate.create({
       name,
@@ -70,17 +104,107 @@ export async function POST(
       resumeData,
       resumeFilename,
       resumeContentType,
+      screeningQuestions: screeningQuestionsForDb,
+      screeningAnswers: answers,
+      resumeMatchScore: Number.isFinite(resumeMatchScore) ? resumeMatchScore : undefined,
+      resumeMatchReason: resumeMatchReason || undefined,
+      screeningTimeLimitSeconds: Number.isFinite(screeningTimeLimitSeconds) ? screeningTimeLimitSeconds : undefined,
       appliedAt: new Date(),
     });
 
-    // Increment applicant count on the job
     await Job.findByIdAndUpdate(id, { $inc: { applicantCount: 1 } });
+
+    // --- Grading ---
+    // MCQ: auto-grade by comparing selected index to correctIndex
+    // Descriptive: LLM-grade only those 2 questions
+    let questionScores: number[] = [];
+    let questionFeedback: string[] = [];
+    let totalScore = 0;
+    let overallFeedback = "";
+
+    try {
+      const mcqScores: number[] = [];
+      const descIndices: number[] = [];
+      const descQuestions: string[] = [];
+      const descAnswers: string[] = [];
+
+      questions.forEach((q, i) => {
+        if (q.type === "mcq") {
+          const selected = Number.parseInt(answers[i] ?? "-1", 10);
+          mcqScores.push(selected === q.correctIndex ? 10 : 0);
+        } else {
+          descIndices.push(i);
+          descQuestions.push(q.text);
+          descAnswers.push(answers[i] ?? "");
+        }
+      });
+
+      // LLM grades only descriptive questions
+      let descScores: number[] = [];
+      let descFeedback: string[] = [];
+      let descOverall = "";
+
+      if (descQuestions.length > 0) {
+        const graded = await runGradingWorkflow({
+          jobTitle: job.title,
+          jobDescription: job.description,
+          jobRequirements: job.requirements ?? [],
+          questions: descQuestions,
+          answers: descAnswers,
+        });
+        if (!graded.error) {
+          descScores = graded.questionScores;
+          descFeedback = graded.questionFeedback;
+          descOverall = graded.overallFeedback;
+        }
+      }
+
+      // Merge MCQ and descriptive scores back into a single array
+      let mcqIdx = 0;
+      let descIdx = 0;
+      questionScores = questions.map((q) => {
+        if (q.type === "mcq") return mcqScores[mcqIdx++] ?? 0;
+        return descScores[descIdx++] ?? 0;
+      });
+      questionFeedback = questions.map((q, i) => {
+        if (q.type === "mcq") {
+          const selected = Number.parseInt(answers[i] ?? "-1", 10);
+          return selected === q.correctIndex ? "Correct" : `Wrong — correct answer: ${String.fromCharCode(65 + q.correctIndex)}`;
+        }
+        return descFeedback[descIndices.indexOf(i)] ?? "";
+      });
+      totalScore = Math.round(
+        (questionScores.reduce((a, b) => a + b, 0) / (questions.length * 10)) * 100
+      );
+      overallFeedback = descOverall;
+
+      await Candidate.findByIdAndUpdate(candidate._id, {
+        answerScore: totalScore,
+        questionScores,
+        questionFeedback,
+        overallFeedback,
+      });
+
+      sendScreeningResultEmail({
+        to: email,
+        candidateName: name,
+        jobTitle: job.title,
+        totalScore,
+        overallFeedback: overallFeedback || undefined,
+      }).catch(() => {});
+    } catch {
+      // Grading failure must not block submission
+    }
 
     return Response.json(
       {
         success: true,
         candidateId: candidate._id.toString(),
-        message: "Application submitted successfully",
+        questions: questions.map((q) => q.text),
+        questionScores,
+        questionFeedback,
+        totalScore: totalScore || undefined,
+        overallFeedback: overallFeedback || undefined,
       },
       { status: 201 }
     );

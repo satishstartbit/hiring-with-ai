@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
     const jobId = request.nextUrl.searchParams.get("jobId");
     const query = jobId ? { jobId } : {};
     const candidates = await Candidate.find(query)
+      .select("-resumeData")
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
