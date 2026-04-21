@@ -1,14 +1,24 @@
 import nodemailer from "nodemailer";
 
 function createTransport() {
+  const host = process.env.EMAIL_HOST;
+  const user = process.env.EMAIL_USER;
+  const pass = process.env.EMAIL_PASS;
+
+  if (!host || !user || !pass) {
+    throw new Error(
+      `Email env vars missing on this environment: EMAIL_HOST=${host}, EMAIL_USER=${user}, EMAIL_PASS=${pass ? "set" : "missing"}`
+    );
+  }
+
+  const port = Number(process.env.EMAIL_PORT ?? 587);
   return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: Number(process.env.EMAIL_PORT ?? 587),
-    secure: false,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
+    host,
+    port,
+    secure: port === 465,
+    requireTLS: port === 587,
+    auth: { user, pass },
+    tls: { rejectUnauthorized: false },
   });
 }
 

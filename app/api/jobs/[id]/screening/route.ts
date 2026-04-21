@@ -104,7 +104,7 @@ export async function POST(
         jobTitle: job.title,
         matchScore: result.matchScore,
         matchReason: result.matchReason,
-      }).catch(() => {});
+      }).catch((err) => console.error("[email] resume rejected send failed:", err));
       return Response.json({
         matched: false,
         score: result.matchScore,

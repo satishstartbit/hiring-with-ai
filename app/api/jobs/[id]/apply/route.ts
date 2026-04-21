@@ -191,7 +191,7 @@ export async function POST(
         jobTitle: job.title,
         totalScore,
         overallFeedback: overallFeedback || undefined,
-      }).catch(() => {});
+      }).catch((err) => console.error("[email] screening result send failed:", err));
     } catch {
       // Grading failure must not block submission
     }
