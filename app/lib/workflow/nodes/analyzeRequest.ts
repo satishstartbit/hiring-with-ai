@@ -13,6 +13,8 @@ const AnalysisSchema = z.object({
   requirements: z
     .array(z.string())
     .describe("Key skills and requirements, 3-6 items"),
+  immediateJoining: z.boolean().optional(),
+  joiningDays: z.number().optional(),
 });
 
 export async function analyzeRequestNode(
@@ -26,6 +28,7 @@ export async function analyzeRequestNode(
     const llm = createLLM();
     const structured = llm.withStructuredOutput(AnalysisSchema, {
       name: "analyze_hiring_request",
+      strict: false,
     });
 
     const result = await structured.invoke([
