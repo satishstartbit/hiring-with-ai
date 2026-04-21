@@ -4,7 +4,7 @@ import { connectDB } from "../../../../lib/db/connection";
 import Candidate from "../../../../lib/db/models/Candidate";
 import Job from "../../../../lib/db/models/Job";
 import { getGroqErrorMessage } from "../../../../lib/groq";
-import { runScreeningWorkflow } from "../../../../lib/workflow/screeningGraph";
+import { runMatchWorkflow } from "../../../../lib/workflow/screeningGraph";
 import { sendResumeRejectedEmail } from "../../../../lib/email";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ function cleanResumeText(text: string): string {
     .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 12000);
+    .slice(0, 3000);
 }
 
 async function getResumeText(file: File): Promise<string> {
@@ -83,7 +83,7 @@ export async function POST(
 
     const resumeText = await getResumeText(resumeFile);
 
-    const result = await runScreeningWorkflow({
+    const result = await runMatchWorkflow({
       jobTitle: job.title,
       jobDescription: job.description,
       jobRequirements: job.requirements ?? [],
@@ -97,28 +97,25 @@ export async function POST(
       return Response.json({ error: result.error }, { status: 502 });
     }
 
-    // if (!result.matched) {
-    //   sendResumeRejectedEmail({
-    //     to: email,
-    //     candidateName: name,
-    //     jobTitle: job.title,
-    //     matchScore: result.matchScore,
-    //     matchReason: result.matchReason,
-    //   }).catch(() => {});
-    //   return Response.json({
-    //     matched: false,
-    //     score: result.matchScore,
-    //     message: "Your resume does not match the requirements for this position.",
-    //     reason: result.matchReason,
-    //   });
-    // }
+    if (!result.matched) {
+      sendResumeRejectedEmail({
+        to: email,
+        candidateName: name,
+        jobTitle: job.title,
+        matchScore: result.matchScore,
+        matchReason: result.matchReason,
+      }).catch(() => {});
+      return Response.json({
+        matched: false,
+        score: result.matchScore,
+        reason: result.matchReason,
+      });
+    }
 
     return Response.json({
       matched: true,
       score: result.matchScore,
       reason: result.matchReason,
-      questions: result.questions,
-      timeLimitSeconds: result.timeLimitSeconds,
     });
   } catch (err) {
     const message = getGroqErrorMessage(err);

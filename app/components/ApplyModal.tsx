@@ -20,13 +20,10 @@ interface DescriptiveQuestion {
 }
 type ScreeningQuestion = MCQQuestion | DescriptiveQuestion;
 
-interface ScreeningResult {
+interface MatchResult {
   matched: boolean;
-  score?: number;
-  message?: string;
-  reason?: string;
-  questions?: ScreeningQuestion[];
-  timeLimitSeconds?: number;
+  score: number;
+  reason: string;
 }
 
 interface ApplyResult {
@@ -38,7 +35,7 @@ interface ApplyResult {
   overallFeedback?: string;
 }
 
-type Stage = "details" | "questions" | "rejected" | "success";
+type Stage = "details" | "matched" | "questions" | "rejected" | "success";
 
 export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   const [stage, setStage] = useState<Stage>("details");
@@ -49,7 +46,9 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   const [currentTitle, setCurrentTitle] = useState("");
   const [currentCompany, setCurrentCompany] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
-  const [screening, setScreening] = useState<ScreeningResult | null>(null);
+  const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
+  const [questions, setQuestions] = useState<ScreeningQuestion[]>([]);
+  const [timeLimitSeconds, setTimeLimitSeconds] = useState(20 * 60);
   const [answers, setAnswers] = useState<string[]>([]);
   const [timeLeft, setTimeLeft] = useState(0);
   const [isExpired, setIsExpired] = useState(false);
@@ -82,7 +81,8 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   }
 
-  async function handleScreening(e: React.FormEvent<HTMLFormElement>) {
+  // Step 1: check resume match only
+  async function handleCheckResume(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (isSubmitting) return;
     if (!resumeFile) { setError("Resume is required before AI screening."); return; }
@@ -94,16 +94,35 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
         method: "POST",
         body: buildCandidateFormData(),
       });
-      const data: ScreeningResult & { error?: string } = await res.json();
+      const data: (MatchResult & { error?: string }) = await res.json();
       if (!res.ok) { setError(data.error || "AI screening failed"); return; }
 
-      setScreening(data);
-      if (!data.matched) { setStage("rejected"); return; }
+      setMatchResult(data);
+      setStage(data.matched ? "matched" : "rejected");
+    } catch {
+      setError("Network error — please try again");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
-      const questions = data.questions ?? [];
-      setAnswers(Array.from({ length: questions.length }, () => ""));
+  // Step 2: generate questions after user clicks "Continue to Test"
+  async function handleContinueToTest() {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/questions`, { method: "POST" });
+      const data: { questions?: ScreeningQuestion[]; timeLimitSeconds?: number; error?: string } = await res.json();
+      if (!res.ok) { setError(data.error || "Failed to generate questions"); return; }
+
+      const qs = data.questions ?? [];
+      setQuestions(qs);
+      setTimeLimitSeconds(data.timeLimitSeconds ?? 20 * 60);
+      setAnswers(Array.from({ length: qs.length }, () => ""));
       setTimeLeft(data.timeLimitSeconds ?? 20 * 60);
       setIsExpired(false);
+      setCurrentIndex(0);
       setStage("questions");
     } catch {
       setError("Network error — please try again");
@@ -121,13 +140,12 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
       return;
     }
 
-    const questions = screening?.questions ?? [];
     const fd = buildCandidateFormData();
     fd.append("screeningQuestions", JSON.stringify(questions));
     fd.append("screeningAnswers", JSON.stringify(answers));
-    fd.append("resumeMatchScore", String(screening?.score ?? ""));
-    fd.append("resumeMatchReason", screening?.reason ?? "");
-    fd.append("screeningTimeLimitSeconds", String(screening?.timeLimitSeconds ?? 20 * 60));
+    fd.append("resumeMatchScore", String(matchResult?.score ?? ""));
+    fd.append("resumeMatchReason", matchResult?.reason ?? "");
+    fd.append("screeningTimeLimitSeconds", String(timeLimitSeconds));
 
     setIsSubmitting(true);
     setError(null);
@@ -153,7 +171,7 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
         {stage === "success" ? (
           <SuccessState result={applyResult} onClose={onClose} />
         ) : stage === "rejected" ? (
-          <RejectedState screening={screening} onClose={onClose} />
+          <RejectedState matchResult={matchResult} onClose={onClose} />
         ) : (
           <>
             <div className="mb-5 flex items-start justify-between gap-4">
@@ -166,8 +184,8 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
                 aria-label="Close">×</button>
             </div>
 
-            {stage === "details" ? (
-              <form onSubmit={handleScreening} className="space-y-4">
+            {stage === "details" && (
+              <form onSubmit={handleCheckResume} className="space-y-4">
                 <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
                   Upload your resume. The AI checks your fit before showing timed screening questions.
                 </div>
@@ -205,12 +223,35 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
                 {error && <ErrorMsg message={error} />}
                 <button type="submit" disabled={isSubmitting}
                   className="w-full rounded-md bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45">
-                  {isSubmitting ? "AI is reviewing resume…" : "Check Resume & Generate Questions"}
+                  {isSubmitting ? "AI is reviewing your resume…" : "Check Resume"}
                 </button>
               </form>
-            ) : (
+            )}
+
+            {stage === "matched" && (
+              <div className="space-y-5">
+                <div className="rounded-lg border border-green-200 bg-green-50 p-5 text-center space-y-2">
+                  <p className="text-xs font-bold uppercase tracking-wide text-green-700">Resume Matched</p>
+                  <p className="text-4xl font-bold text-green-700">{matchResult?.score}/100</p>
+                  {matchResult?.reason && (
+                    <p className="text-sm text-slate-600 max-w-md mx-auto">{matchResult.reason}</p>
+                  )}
+                </div>
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                  Your resume is a good match. Click below to start the timed screening test (8 multiple-choice + 2 open-ended questions).
+                </div>
+                {error && <ErrorMsg message={error} />}
+                <button type="button" onClick={handleContinueToTest} disabled={isSubmitting}
+                  className="w-full rounded-md bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45">
+                  {isSubmitting ? "Generating questions…" : "Continue to Test →"}
+                </button>
+              </div>
+            )}
+
+            {stage === "questions" && (
               <QuestionsStage
-                screening={screening}
+                matchResult={matchResult}
+                questions={questions}
                 answers={answers}
                 setAnswers={setAnswers}
                 currentIndex={currentIndex}
@@ -232,7 +273,8 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
 }
 
 interface QuestionsStageProps {
-  screening: ScreeningResult | null;
+  matchResult: MatchResult | null;
+  questions: ScreeningQuestion[];
   answers: string[];
   setAnswers: (a: string[]) => void;
   currentIndex: number;
@@ -247,7 +289,8 @@ interface QuestionsStageProps {
 }
 
 function QuestionsStage({
-  screening,
+  matchResult,
+  questions,
   answers,
   setAnswers,
   currentIndex,
@@ -260,7 +303,6 @@ function QuestionsStage({
   onSubmit,
   formatTime,
 }: QuestionsStageProps) {
-  const questions = screening?.questions ?? [];
   const total = questions.length;
   const isLast = currentIndex === total - 1;
   const answeredCount = answers.filter((a) => a.trim()).length;
@@ -285,7 +327,7 @@ function QuestionsStage({
       {/* Header bar: match score + timer */}
       <div className="flex items-center justify-between gap-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-3">
         <p className="text-sm font-bold text-blue-900">
-          Resume match: {screening?.score ?? 0}/100
+          Resume match: {matchResult?.score ?? 0}/100
         </p>
         <div className={`rounded-md px-3 py-1.5 text-base font-bold tabular-nums ${
           isExpired ? "bg-red-600 text-white" : "bg-white text-blue-700"
@@ -474,19 +516,20 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
-function RejectedState({ screening, onClose }: { screening: ScreeningResult | null; onClose: () => void }) {
+function RejectedState({ matchResult, onClose }: { matchResult: MatchResult | null; onClose: () => void }) {
   return (
     <div className="space-y-4 py-4 text-center">
       <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-red-50 text-sm font-bold text-red-700">✕</div>
       <p className="text-lg font-bold text-slate-950">
-        {screening?.message || "Your resume does not match the requirements for this position."}
+        Your resume does not match the requirements for this position.
       </p>
-      {typeof screening?.score === "number" && (
-        <p className="text-sm font-bold text-red-700">Match score: {screening.score}/100</p>
+      {typeof matchResult?.score === "number" && (
+        <p className="text-sm font-bold text-red-700">Match score: {matchResult.score}/100</p>
       )}
-      {screening?.reason && (
-        <p className="mx-auto max-w-lg text-sm text-slate-600">{screening.reason}</p>
+      {matchResult?.reason && (
+        <p className="mx-auto max-w-lg text-sm text-slate-600">{matchResult.reason}</p>
       )}
+      <p className="text-xs text-slate-500">A rejection email has been sent to your inbox.</p>
       <button type="button" onClick={onClose}
         className="mt-2 rounded-md bg-red-600 px-6 py-2 text-sm font-bold text-white transition-colors hover:bg-red-700">
         Close

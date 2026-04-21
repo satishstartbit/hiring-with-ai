@@ -36,7 +36,7 @@ export async function matchResumeNode(
           `Job title: ${state.jobTitle}`,
           `Department: ${state.jobDepartment}`,
           `Requirements: ${state.jobRequirements.join(", ")}`,
-          `Job description: ${state.jobDescription.slice(0, 2000)}`,
+          `Job description: ${state.jobDescription.slice(0, 800)}`,
           "",
           `Candidate name: ${state.candidateName}`,
           `Current title: ${state.candidateTitle || "Not provided"}`,

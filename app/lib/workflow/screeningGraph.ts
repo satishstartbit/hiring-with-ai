@@ -1,5 +1,5 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
-import { ScreeningStateAnnotation, type ScreeningState } from "./screeningState";
+import { ScreeningStateAnnotation } from "./screeningState";
 import { matchResumeNode } from "./nodes/matchResume";
 import { generateQuestionsNode } from "./nodes/generateQuestions";
 
@@ -7,18 +7,19 @@ export type { ScreeningQuestion } from "./screeningState";
 
 const SCREENING_TIME_LIMIT_SECONDS = 20 * 60;
 
-const graph = new StateGraph(ScreeningStateAnnotation)
+const compiledMatchGraph = new StateGraph(ScreeningStateAnnotation)
   .addNode("matchResume", matchResumeNode)
-  .addNode("generateQuestions", generateQuestionsNode)
   .addEdge(START, "matchResume")
-  .addConditionalEdges("matchResume", (state: ScreeningState) =>
-    state.error || !state.isMatch ? END : "generateQuestions"
-  )
-  .addEdge("generateQuestions", END);
+  .addEdge("matchResume", END)
+  .compile();
 
-const compiledScreeningGraph = graph.compile();
+const compiledQuestionsGraph = new StateGraph(ScreeningStateAnnotation)
+  .addNode("generateQuestions", generateQuestionsNode)
+  .addEdge(START, "generateQuestions")
+  .addEdge("generateQuestions", END)
+  .compile();
 
-export interface ScreeningInput {
+export interface MatchInput {
   jobTitle: string;
   jobDescription: string;
   jobRequirements: string[];
@@ -28,23 +29,41 @@ export interface ScreeningInput {
   resumeText: string;
 }
 
-export interface ScreeningOutput {
+export interface MatchOutput {
   matched: boolean;
   matchScore: number;
   matchReason: string;
+  error?: string;
+}
+
+export interface QuestionsInput {
+  jobTitle: string;
+  jobDescription: string;
+  jobRequirements: string[];
+  jobDepartment: string;
+}
+
+export interface QuestionsOutput {
   questions: import("./screeningState").ScreeningQuestion[];
   timeLimitSeconds: number;
   error?: string;
 }
 
-export async function runScreeningWorkflow(
-  input: ScreeningInput
-): Promise<ScreeningOutput> {
-  const finalState = await compiledScreeningGraph.invoke(input);
+export async function runMatchWorkflow(input: MatchInput): Promise<MatchOutput> {
+  const finalState = await compiledMatchGraph.invoke(input);
   return {
     matched: finalState.isMatch,
     matchScore: finalState.matchScore,
     matchReason: finalState.matchReason,
+    error: finalState.error,
+  };
+}
+
+export async function runQuestionsWorkflow(
+  input: QuestionsInput
+): Promise<QuestionsOutput> {
+  const finalState = await compiledQuestionsGraph.invoke(input);
+  return {
     questions: finalState.questions,
     timeLimitSeconds: SCREENING_TIME_LIMIT_SECONDS,
     error: finalState.error,
