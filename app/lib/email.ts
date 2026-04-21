@@ -1,26 +1,24 @@
 import nodemailer from "nodemailer";
 
 function createTransport() {
-  const host = process.env.EMAIL_HOST;
-  const user = process.env.EMAIL_USER;
-  const pass = process.env.EMAIL_PASS;
+  const user = process.env.EMAIL_USER?.trim();
+  const pass = process.env.EMAIL_PASS?.trim();
 
-  if (!host || !user || !pass) {
+  if (!user || !pass) {
     throw new Error(
-      `Email env vars missing on this environment: EMAIL_HOST=${host}, EMAIL_USER=${user}, EMAIL_PASS=${pass ? "set" : "missing"}`
+      `Email env vars missing: EMAIL_USER=${user ? "set" : "missing"}, EMAIL_PASS=${pass ? "set" : "missing"}`
     );
   }
 
-  const port = Number(process.env.EMAIL_PORT ?? 587);
   return nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    requireTLS: port === 587,
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
     auth: { user, pass },
-    tls: { rejectUnauthorized: false },
   });
 }
+
+const FROM = process.env.EMAIL_FROM ?? `Hiring Team <${process.env.EMAIL_USER}>`;
 
 interface ResumeRejectedParams {
   to: string;
@@ -34,7 +32,7 @@ export async function sendResumeRejectedEmail(params: ResumeRejectedParams) {
   const { to, candidateName, jobTitle, matchScore, matchReason } = params;
   const transporter = createTransport();
   await transporter.sendMail({
-    from: process.env.EMAIL_FROM,
+    from: FROM,
     to,
     subject: `Application Update — ${jobTitle}`,
     html: `
@@ -65,10 +63,9 @@ interface ScreeningResultParams {
 export async function sendScreeningResultEmail(params: ScreeningResultParams) {
   const { to, candidateName, jobTitle, totalScore, overallFeedback } = params;
   const passed = totalScore >= 70;
-
   const transporter = createTransport();
   await transporter.sendMail({
-    from: process.env.EMAIL_FROM,
+    from: FROM,
     to,
     subject: `Screening Result — ${jobTitle}`,
     html: `
