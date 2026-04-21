@@ -1,0 +1,86 @@
+import { StateGraph, START, END } from "@langchain/langgraph";
+import { HiringStateAnnotation, type WorkflowStep } from "./state";
+import { analyzeRequestNode } from "./nodes/analyzeRequest";
+import { generateJobDescriptionNode } from "./nodes/generateJobDescription";
+import { postJobNode } from "./nodes/postJob";
+import { trackCandidatesNode } from "./nodes/trackCandidates";
+import { connectDB } from "../db/connection";
+import WorkflowRun from "../db/models/WorkflowRun";
+
+type HiringState = typeof HiringStateAnnotation.State;
+
+// Conditional edge: stop at END on error, otherwise continue to next node
+function routeOrStop(next: string) {
+  return (state: HiringState): string =>
+    state.error ? END : next;
+}
+
+// Wrap each node so intermediate step state is persisted to MongoDB after every step
+function withPersist(
+  fn: (state: HiringState) => Promise<Partial<HiringState>>
+) {
+  return async (state: HiringState): Promise<Partial<HiringState>> => {
+    const update = await fn(state);
+    if (state.workflowRunId && update.steps) {
+      await WorkflowRun.findByIdAndUpdate(state.workflowRunId, {
+        steps: update.steps,
+      });
+    }
+    return update;
+  };
+}
+
+// Build and compile the LangGraph StateGraph once
+const workflow = new StateGraph(HiringStateAnnotation)
+  .addNode("analyzeRequest", withPersist(analyzeRequestNode))
+  .addNode("generateJobDescription", withPersist(generateJobDescriptionNode))
+  .addNode("postJob", withPersist(postJobNode))
+  .addNode("openForApplications", withPersist(trackCandidatesNode))
+  .addEdge(START, "analyzeRequest")
+  .addConditionalEdges("analyzeRequest", routeOrStop("generateJobDescription"))
+  .addConditionalEdges("generateJobDescription", routeOrStop("postJob"))
+  .addConditionalEdges("postJob", routeOrStop("openForApplications"))
+  .addEdge("openForApplications", END);
+
+const compiledGraph = workflow.compile();
+
+export async function runHiringWorkflow(userRequest: string): Promise<{
+  workflowRunId: string;
+  steps: WorkflowStep[];
+  jobId?: string;
+  error?: string;
+}> {
+  await connectDB();
+
+  const initialSteps: WorkflowStep[] = [
+    { name: "Analyze Request", status: "pending" },
+    { name: "Generate Job Description", status: "pending" },
+    { name: "Post Job", status: "pending" },
+    { name: "Open for Applications", status: "pending" },
+  ];
+
+  const workflowRun = await WorkflowRun.create({
+    userRequest,
+    status: "running",
+    steps: initialSteps,
+  });
+
+  const workflowRunId = workflowRun._id.toString();
+
+  const finalState = await compiledGraph.invoke({
+    userRequest,
+    workflowRunId,
+    steps: initialSteps,
+  });
+
+  if (finalState.error) {
+    await WorkflowRun.findByIdAndUpdate(workflowRunId, { status: "failed" });
+  }
+
+  return {
+    workflowRunId,
+    steps: finalState.steps,
+    jobId: finalState.jobId,
+    error: finalState.error,
+  };
+}
