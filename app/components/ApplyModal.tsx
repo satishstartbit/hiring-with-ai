@@ -33,28 +33,43 @@ interface ApplyResult {
   questionScores?: number[];
   questionFeedback?: string[];
   overallFeedback?: string;
+  interviewRequired?: boolean;
 }
 
-type Stage = "details" | "matched" | "questions" | "rejected" | "success";
+type Stage =
+  | "details"
+  | "matched"
+  | "questions"
+  | "rejected"
+  | "schedule"
+  | "success";
 
 export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   const [stage, setStage] = useState<Stage>("details");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Candidate details
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [currentTitle, setCurrentTitle] = useState("");
   const [currentCompany, setCurrentCompany] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Screening
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
   const [questions, setQuestions] = useState<ScreeningQuestion[]>([]);
   const [timeLimitSeconds, setTimeLimitSeconds] = useState(20 * 60);
   const [answers, setAnswers] = useState<string[]>([]);
   const [timeLeft, setTimeLeft] = useState(0);
   const [isExpired, setIsExpired] = useState(false);
-  const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
+
+  // Interview scheduling
+  const [slots, setSlots] = useState<{ date: string; label: string; times: { iso: string; label: string }[] }[]>([]);
+  const [scheduledConfirmation, setScheduledConfirmation] = useState<{ date: string; meetingUrl?: string; message?: string } | null>(null);
 
   useEffect(() => {
     if (stage !== "questions" || timeLeft <= 0 || isExpired) return;
@@ -81,12 +96,10 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   }
 
-  // Step 1: check resume match only
   async function handleCheckResume(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (isSubmitting) return;
     if (!resumeFile) { setError("Resume is required before AI screening."); return; }
-
     setIsSubmitting(true);
     setError(null);
     try {
@@ -96,7 +109,6 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
       });
       const data: (MatchResult & { error?: string }) = await res.json();
       if (!res.ok) { setError(data.error || "AI screening failed"); return; }
-
       setMatchResult(data);
       setStage(data.matched ? "matched" : "rejected");
     } catch {
@@ -106,7 +118,6 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
     }
   }
 
-  // Step 2: generate questions after user clicks "Continue to Test"
   async function handleContinueToTest() {
     if (isSubmitting) return;
     setIsSubmitting(true);
@@ -115,7 +126,6 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
       const res = await fetch(`/api/jobs/${jobId}/questions`, { method: "POST" });
       const data: { questions?: ScreeningQuestion[]; timeLimitSeconds?: number; error?: string } = await res.json();
       if (!res.ok) { setError(data.error || "Failed to generate questions"); return; }
-
       const qs = data.questions ?? [];
       setQuestions(qs);
       setTimeLimitSeconds(data.timeLimitSeconds ?? 20 * 60);
@@ -139,22 +149,75 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
       setError("Please answer every question before submitting.");
       return;
     }
-
     const fd = buildCandidateFormData();
     fd.append("screeningQuestions", JSON.stringify(questions));
     fd.append("screeningAnswers", JSON.stringify(answers));
     fd.append("resumeMatchScore", String(matchResult?.score ?? ""));
     fd.append("resumeMatchReason", matchResult?.reason ?? "");
     fd.append("screeningTimeLimitSeconds", String(timeLimitSeconds));
-
     setIsSubmitting(true);
     setError(null);
     try {
       const res = await fetch(`/api/jobs/${jobId}/apply`, { method: "POST", body: fd });
-      const data = await res.json();
+      const data: ApplyResult & { error?: string } = await res.json();
       if (!res.ok) { setError(data.error || "Something went wrong"); return; }
       setApplyResult(data);
-      setStage("success");
+      if (data.interviewRequired) {
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+        const slotsRes = await fetch(`/api/jobs/${jobId}/interview?timeZone=${encodeURIComponent(timeZone)}`);
+        const slotsData: { slots?: typeof slots; error?: string } = await slotsRes.json();
+        if (!slotsRes.ok) { setError(slotsData.error || "Failed to load Cal.com availability"); return; }
+        setSlots(slotsData.slots ?? []);
+        setStage("schedule");
+      } else {
+        setStage("success");
+      }
+    } catch {
+      setError("Network error — please try again");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleSchedule(scheduledDate: string) {
+    if (isSubmitting || !applyResult?.candidateId) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/interview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateId: applyResult.candidateId,
+          scheduledDate,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+        }),
+      });
+      const data: {
+        sessionId?: string;
+        immediate?: boolean;
+        meetingUrl?: string;
+        scheduledAt?: string;
+        message?: string;
+        error?: string;
+      } = await res.json();
+      if (!res.ok) { setError(data.error || "Scheduling failed"); return; }
+
+      if (data.immediate && data.meetingUrl) {
+        // Redirect directly to the video interview room
+        window.open(data.meetingUrl, "_blank");
+        setStage("success");
+      } else if (data.scheduledAt) {
+        const d = new Date(data.scheduledAt);
+        const label = d.toLocaleString("en-US", {
+          weekday: "long", month: "short", day: "numeric",
+          hour: "2-digit", minute: "2-digit",
+        });
+        setScheduledConfirmation({ date: label, meetingUrl: data.meetingUrl, message: data.message });
+        setStage("success");
+      } else {
+        setStage("success");
+      }
     } catch {
       setError("Network error — please try again");
     } finally {
@@ -164,113 +227,227 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-2xl">
-        {stage === "success" ? (
-          <SuccessState result={applyResult} onClose={onClose} />
-        ) : stage === "rejected" ? (
-          <RejectedState matchResult={matchResult} onClose={onClose} />
-        ) : (
-          <>
-            <div className="mb-5 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-bold text-slate-950">Apply for position</h2>
-                <p className="mt-0.5 text-sm text-slate-500">{jobTitle}</p>
-              </div>
-              <button type="button" onClick={onClose}
-                className="rounded-md px-2 py-1 text-xl leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-950"
-                aria-label="Close">×</button>
+      <div className="max-h-[94vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-2xl">
+        {/* Header */}
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-6 py-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Apply for position</h2>
+              <p className="text-xs text-slate-500 mt-0.5">{jobTitle}</p>
             </div>
+            <button type="button" onClick={onClose}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+              aria-label="Close">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M4.47 4.47a.75.75 0 0 1 1.06 0L8 6.94l2.47-2.47a.75.75 0 1 1 1.06 1.06L9.06 8l2.47 2.47a.75.75 0 1 1-1.06 1.06L8 9.06l-2.47 2.47a.75.75 0 0 1-1.06-1.06L6.94 8 4.47 5.53a.75.75 0 0 1 0-1.06Z"/>
+              </svg>
+            </button>
+          </div>
 
-            {stage === "details" && (
-              <form onSubmit={handleCheckResume} className="space-y-4">
-                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-                  Upload your resume. The AI checks your fit before showing timed screening questions.
-                </div>
+        <div className="p-6">
+          {stage === "success" && <SuccessState result={applyResult} scheduledConfirmation={scheduledConfirmation} onClose={onClose} />}
+          {stage === "rejected" && <RejectedState matchResult={matchResult} onClose={onClose} />}
+
+          {stage === "details" && (
+            <form onSubmit={handleCheckResume} className="space-y-4">
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
+                Upload your resume. Our AI checks your fit before unlocking timed screening questions.
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Full name *">
-                  <input name="name" type="text" required value={name}
-                    onChange={(e) => setName(e.target.value)} placeholder="Alex Johnson"
-                    className="field-input" />
+                  <input type="text" required value={name} onChange={(e) => setName(e.target.value)}
+                    placeholder="Alex Johnson" className="field-input" />
                 </Field>
                 <Field label="Email *">
-                  <input name="email" type="email" required value={email}
-                    onChange={(e) => setEmail(e.target.value)} placeholder="alex@example.com"
-                    className="field-input" />
+                  <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+                    placeholder="alex@example.com" className="field-input" />
                 </Field>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Current title">
-                    <input name="currentTitle" type="text" value={currentTitle}
-                      onChange={(e) => setCurrentTitle(e.target.value)} placeholder="Software Engineer"
-                      className="field-input" />
-                  </Field>
-                  <Field label="Company">
-                    <input name="currentCompany" type="text" value={currentCompany}
-                      onChange={(e) => setCurrentCompany(e.target.value)} placeholder="TechCorp"
-                      className="field-input" />
-                  </Field>
-                </div>
-                <Field label="Resume (PDF, DOC, TXT — max 5 MB) *">
-                  <button type="button" onClick={() => fileInputRef.current?.click()}
-                    className="w-full rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center text-sm font-medium text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-800">
-                    {resumeFile?.name || "Click to upload resume"}
-                  </button>
-                  <input ref={fileInputRef} name="resume" type="file"
-                    accept=".pdf,.doc,.docx,.txt" className="hidden"
-                    onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)} />
+                <Field label="Current title">
+                  <input type="text" value={currentTitle} onChange={(e) => setCurrentTitle(e.target.value)}
+                    placeholder="Software Engineer" className="field-input" />
                 </Field>
-                {error && <ErrorMsg message={error} />}
-                <button type="submit" disabled={isSubmitting}
-                  className="w-full rounded-md bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45">
-                  {isSubmitting ? "AI is reviewing your resume…" : "Check Resume"}
-                </button>
-              </form>
-            )}
-
-            {stage === "matched" && (
-              <div className="space-y-5">
-                <div className="rounded-lg border border-green-200 bg-green-50 p-5 text-center space-y-2">
-                  <p className="text-xs font-bold uppercase tracking-wide text-green-700">Resume Matched</p>
-                  <p className="text-4xl font-bold text-green-700">{matchResult?.score}/100</p>
-                  {matchResult?.reason && (
-                    <p className="text-sm text-slate-600 max-w-md mx-auto">{matchResult.reason}</p>
-                  )}
-                </div>
-                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-                  Your resume is a good match. Click below to start the timed screening test (8 multiple-choice + 2 open-ended questions).
-                </div>
-                {error && <ErrorMsg message={error} />}
-                <button type="button" onClick={handleContinueToTest} disabled={isSubmitting}
-                  className="w-full rounded-md bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45">
-                  {isSubmitting ? "Generating questions…" : "Continue to Test →"}
-                </button>
+                <Field label="Current company">
+                  <input type="text" value={currentCompany} onChange={(e) => setCurrentCompany(e.target.value)}
+                    placeholder="TechCorp" className="field-input" />
+                </Field>
               </div>
-            )}
+              <Field label="Resume (PDF, DOC, TXT — max 5 MB) *">
+                <button type="button" onClick={() => fileInputRef.current?.click()}
+                  className="w-full rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm font-medium text-slate-500 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700">
+                  {resumeFile ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <span className="text-green-600">✓</span> {resumeFile.name}
+                    </span>
+                  ) : "Click to upload resume"}
+                </button>
+                <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.txt" className="hidden"
+                  onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)} />
+              </Field>
+              {error && <ErrorMsg message={error} />}
+              <button type="submit" disabled={isSubmitting}
+                className="w-full rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                {isSubmitting ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Spinner /> AI is reviewing your resume…
+                  </span>
+                ) : "Check Resume Fit"}
+              </button>
+            </form>
+          )}
 
-            {stage === "questions" && (
-              <QuestionsStage
-                matchResult={matchResult}
-                questions={questions}
-                answers={answers}
-                setAnswers={setAnswers}
-                currentIndex={currentIndex}
-                setCurrentIndex={setCurrentIndex}
-                timeLeft={timeLeft}
-                isExpired={isExpired}
-                isSubmitting={isSubmitting}
-                error={error}
-                setError={setError}
-                onSubmit={handleFinalSubmit}
-                formatTime={formatTime}
-              />
-            )}
-          </>
-        )}
+          {stage === "matched" && (
+            <div className="space-y-5">
+              <div className="rounded-xl border border-green-200 bg-gradient-to-b from-green-50 to-white p-6 text-center space-y-1">
+                <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700 font-bold text-lg">✓</div>
+                <p className="text-xs font-bold uppercase tracking-widest text-green-600">Resume Matched</p>
+                <p className="text-4xl font-bold text-slate-900">{matchResult?.score}<span className="text-xl text-slate-400">/100</span></p>
+                {matchResult?.reason && <p className="text-sm text-slate-600 max-w-md mx-auto mt-1">{matchResult.reason}</p>}
+              </div>
+              <div className="rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm text-amber-800">
+                Next: a timed screening test — 8 multiple-choice + 2 open-ended questions (20 min limit).
+              </div>
+              {error && <ErrorMsg message={error} />}
+              <button type="button" onClick={handleContinueToTest} disabled={isSubmitting}
+                className="w-full rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-50">
+                {isSubmitting ? <span className="flex items-center justify-center gap-2"><Spinner />Generating questions…</span> : "Continue to Test →"}
+              </button>
+            </div>
+          )}
+
+          {stage === "questions" && (
+            <QuestionsStage
+              matchResult={matchResult}
+              questions={questions}
+              answers={answers}
+              setAnswers={setAnswers}
+              currentIndex={currentIndex}
+              setCurrentIndex={setCurrentIndex}
+              timeLeft={timeLeft}
+              isExpired={isExpired}
+              isSubmitting={isSubmitting}
+              error={error}
+              setError={setError}
+              onSubmit={handleFinalSubmit}
+              formatTime={formatTime}
+            />
+          )}
+
+          {stage === "schedule" && (
+            <ScheduleStage
+              score={applyResult?.totalScore}
+              slots={slots}
+              isSubmitting={isSubmitting}
+              error={error}
+              onSchedule={handleSchedule}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
 }
+
+// ─── Schedule Stage ───────────────────────────────────────────────────────────
+
+function ScheduleStage({
+  score,
+  slots,
+  isSubmitting,
+  error,
+  onSchedule,
+}: {
+  score?: number;
+  slots: { date: string; label: string; times: { iso: string; label: string }[] }[];
+  isSubmitting: boolean;
+  error: string | null;
+  onSchedule: (date: string) => void;
+}) {
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl border border-green-200 bg-gradient-to-b from-green-50 to-white p-5 text-center space-y-1">
+        <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700 font-bold text-xl">🎉</div>
+        <p className="text-xs font-bold uppercase tracking-widest text-green-600">You Passed the Screening!</p>
+        {score !== undefined && (
+          <p className="text-3xl font-bold text-slate-900">{score}<span className="text-base text-slate-400">/100</span></p>
+        )}
+        <p className="text-sm text-slate-600">Schedule your 10-minute AI video interview with Cal.com to continue.</p>
+      </div>
+
+      <div className="space-y-4">
+        <p className="text-sm font-bold text-slate-700">When would you like to interview?</p>
+
+        {/* Immediate option */}
+        <button
+          onClick={() => onSchedule("immediate")}
+          disabled={isSubmitting}
+          className="w-full rounded-xl border-2 border-blue-500 bg-blue-50 px-4 py-4 text-left transition-colors hover:bg-blue-100 disabled:opacity-50"
+        >
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white text-lg">▶</span>
+            <div>
+              <p className="text-sm font-bold text-blue-800">Start Now</p>
+              <p className="text-xs text-blue-600">Opens your AI video interview immediately (~10 min)</p>
+            </div>
+          </div>
+        </button>
+
+        {/* Date + time slot picker */}
+        <div className="space-y-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Or pick a Cal.com time slot</p>
+
+          {/* Date tabs */}
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            {slots.map((slot) => (
+              <button
+                key={slot.date}
+                onClick={() => setSelectedDate(slot.date === selectedDate ? null : slot.date)}
+                className={`shrink-0 rounded-lg border px-3 py-2 text-xs font-bold transition-colors ${
+                  selectedDate === slot.date
+                    ? "border-blue-500 bg-blue-600 text-white"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                }`}
+              >
+                {slot.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Time slots for selected date */}
+          {selectedDate && (() => {
+            const daySlots = slots.find((s) => s.date === selectedDate);
+            return daySlots ? (
+              <div className="grid grid-cols-4 gap-2">
+                {daySlots.times.map(({ iso, label }) => (
+                  <button
+                    key={iso}
+                    onClick={() => onSchedule(iso)}
+                    disabled={isSubmitting}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : null;
+          })()}
+        </div>
+      </div>
+
+      {error && <ErrorMsg message={error} />}
+      {isSubmitting && (
+        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+          <Spinner /> Setting up your interview…
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Questions Stage ──────────────────────────────────────────────────────────
 
 interface QuestionsStageProps {
   matchResult: MatchResult | null;
@@ -289,19 +466,8 @@ interface QuestionsStageProps {
 }
 
 function QuestionsStage({
-  matchResult,
-  questions,
-  answers,
-  setAnswers,
-  currentIndex,
-  setCurrentIndex,
-  timeLeft,
-  isExpired,
-  isSubmitting,
-  error,
-  setError,
-  onSubmit,
-  formatTime,
+  matchResult, questions, answers, setAnswers, currentIndex, setCurrentIndex,
+  timeLeft, isExpired, isSubmitting, error, setError, onSubmit, formatTime,
 }: QuestionsStageProps) {
   const total = questions.length;
   const isLast = currentIndex === total - 1;
@@ -309,77 +475,47 @@ function QuestionsStage({
   const progressPct = total > 0 ? Math.round((answeredCount / total) * 100) : 0;
 
   function handleNext() {
-    if (!answers[currentIndex]?.trim()) {
-      setError("Please answer this question before moving on.");
-      return;
-    }
+    if (!answers[currentIndex]?.trim()) { setError("Please answer this question before moving on."); return; }
     setError(null);
     setCurrentIndex(currentIndex + 1);
   }
 
-  function handlePrev() {
-    setError(null);
-    setCurrentIndex(currentIndex - 1);
-  }
-
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      {/* Header bar: match score + timer */}
-      <div className="flex items-center justify-between gap-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-3">
-        <p className="text-sm font-bold text-blue-900">
-          Resume match: {matchResult?.score ?? 0}/100
-        </p>
-        <div className={`rounded-md px-3 py-1.5 text-base font-bold tabular-nums ${
-          isExpired ? "bg-red-600 text-white" : "bg-white text-blue-700"
-        }`}>
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+        <p className="text-sm font-bold text-blue-900">Resume match: {matchResult?.score ?? 0}/100</p>
+        <div className={`rounded-lg px-3 py-1.5 text-sm font-bold tabular-nums ${isExpired ? "bg-red-600 text-white" : "bg-white text-blue-700 border border-blue-200"}`}>
           {formatTime(timeLeft)}
         </div>
       </div>
 
-      {/* Progress bar */}
       <div className="space-y-1">
         <div className="flex items-center justify-between text-xs font-medium text-slate-500">
           <span>Question {currentIndex + 1} of {total}</span>
           <span>{answeredCount}/{total} answered</span>
         </div>
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-          <div
-            className="h-full rounded-full bg-blue-500 transition-all duration-300"
-            style={{ width: `${progressPct}%` }}
-          />
+          <div className="h-full rounded-full bg-blue-500 transition-all duration-300" style={{ width: `${progressPct}%` }} />
         </div>
       </div>
 
-      {/* Current question */}
-      <div className="rounded-md border border-slate-200 bg-white p-5">
-        <p className="text-sm font-bold text-slate-950 leading-snug">
+      <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <p className="text-sm font-bold text-slate-900 leading-snug">
           {currentIndex + 1}. {questions[currentIndex]?.text}
         </p>
         {questions[currentIndex]?.type === "mcq" ? (
           <div className="mt-4 space-y-2">
             {(questions[currentIndex] as MCQQuestion).options.map((option, optIdx) => (
-              <label
-                key={optIdx}
-                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
-                  answers[currentIndex] === String(optIdx)
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name={`q-${currentIndex}`}
-                  value={String(optIdx)}
-                  checked={answers[currentIndex] === String(optIdx)}
+              <label key={optIdx} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                answers[currentIndex] === String(optIdx) ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+              }`}>
+                <input type="radio" name={`q-${currentIndex}`} value={String(optIdx)}
+                  checked={answers[currentIndex] === String(optIdx)} disabled={isExpired}
                   onChange={() => {
-                    const next = [...answers];
-                    next[currentIndex] = String(optIdx);
-                    setAnswers(next);
+                    const next = [...answers]; next[currentIndex] = String(optIdx); setAnswers(next);
                     if (error) setError(null);
                   }}
-                  disabled={isExpired}
-                  className="mt-0.5 shrink-0"
-                />
+                  className="mt-0.5 shrink-0" />
                 <span className="text-sm text-slate-800">
                   <span className="font-bold">{String.fromCharCode(65 + optIdx)}.</span> {option}
                 </span>
@@ -387,19 +523,12 @@ function QuestionsStage({
             ))}
           </div>
         ) : (
-          <textarea
-            key={currentIndex}
-            rows={6}
-            value={answers[currentIndex] ?? ""}
+          <textarea key={currentIndex} rows={6} value={answers[currentIndex] ?? ""} disabled={isExpired} autoFocus
             onChange={(e) => {
-              const next = [...answers];
-              next[currentIndex] = e.target.value;
-              setAnswers(next);
+              const next = [...answers]; next[currentIndex] = e.target.value; setAnswers(next);
               if (error) setError(null);
             }}
-            disabled={isExpired}
-            autoFocus
-            className="mt-4 w-full resize-none rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+            className="mt-4 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
             placeholder="Write your answer here…"
           />
         )}
@@ -408,32 +537,20 @@ function QuestionsStage({
       {isExpired && <ErrorMsg message="Time expired. Please close and restart the application." />}
       {error && <ErrorMsg message={error} />}
 
-      {/* Navigation */}
       <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={handlePrev}
+        <button type="button" onClick={() => { setError(null); setCurrentIndex(currentIndex - 1); }}
           disabled={currentIndex === 0 || isExpired}
-          className="flex-1 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-        >
+          className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
           ← Previous
         </button>
-
         {isLast ? (
-          <button
-            type="submit"
-            disabled={isSubmitting || isExpired}
-            className="flex-1 rounded-md bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            {isSubmitting ? "Grading and submitting…" : "Submit Application"}
+          <button type="submit" disabled={isSubmitting || isExpired}
+            className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">
+            {isSubmitting ? <span className="flex items-center justify-center gap-2"><Spinner />Grading…</span> : "Submit Application"}
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={handleNext}
-            disabled={isExpired}
-            className="flex-1 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45"
-          >
+          <button type="button" onClick={handleNext} disabled={isExpired}
+            className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-40">
             Next →
           </button>
         )}
@@ -442,50 +559,73 @@ function QuestionsStage({
   );
 }
 
-function SuccessState({ result, onClose }: { result: ApplyResult | null; onClose: () => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const hasScore = result?.totalScore !== undefined;
+// ─── Success / Rejected ───────────────────────────────────────────────────────
 
+function SuccessState({
+  result,
+  scheduledConfirmation,
+  onClose,
+}: {
+  result: ApplyResult | null;
+  scheduledConfirmation: { date: string; meetingUrl?: string; message?: string } | null;
+  onClose: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="space-y-5">
-      <div className="text-center space-y-2 pt-4">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700 text-lg font-bold">✓</div>
-        <p className="text-lg font-bold text-slate-950">Application submitted</p>
-        <p className="text-sm text-slate-600">Your resume and answers have been saved.</p>
-      </div>
-
-      {hasScore && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-bold text-slate-700">Your screening score</span>
-            <ScoreBadge score={result!.totalScore!} />
-          </div>
-
-          {result?.overallFeedback && (
-            <p className="text-sm text-slate-600">{result.overallFeedback}</p>
+      {scheduledConfirmation ? (
+        <div className="rounded-xl border border-blue-200 bg-gradient-to-b from-blue-50 to-white p-6 text-center space-y-2">
+          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-700 font-bold text-xl">📅</div>
+          <p className="text-base font-bold text-slate-900">Interview Scheduled!</p>
+          <p className="text-sm text-slate-600">Your AI video interview is confirmed for:</p>
+          <p className="text-sm font-bold text-blue-800">{scheduledConfirmation.date}</p>
+          <p className="text-xs text-slate-500">
+            {scheduledConfirmation.message || "A confirmation email with your meeting link has been sent to your inbox."}
+          </p>
+          {scheduledConfirmation.meetingUrl && (
+          <a
+            href={scheduledConfirmation.meetingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700"
+          >
+            Join AI Interview →
+          </a>
           )}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center space-y-1">
+          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700 font-bold text-xl">✓</div>
+          <p className="text-base font-bold text-slate-900">Application submitted</p>
+          <p className="text-sm text-slate-500">Your resume and answers have been saved. Check your email for details.</p>
+        </div>
+      )}
 
-          {result?.questions && result.questions.length > 0 && (
+      {result?.totalScore !== undefined && (
+        <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-bold text-slate-700">Screening score</span>
+            <ScoreBadge score={result.totalScore} />
+          </div>
+          {result.overallFeedback && <p className="text-sm text-slate-600">{result.overallFeedback}</p>}
+          {result.questions && result.questions.length > 0 && (
             <>
               <button type="button" onClick={() => setExpanded((x) => !x)}
                 className="text-xs font-bold text-blue-600 hover:underline">
-                {expanded ? "Hide" : "Show"} per-question breakdown
+                {expanded ? "Hide" : "Show"} breakdown
               </button>
-
               {expanded && (
-                <ol className="space-y-3 mt-2">
+                <ol className="space-y-2 mt-1">
                   {result.questions.map((q, i) => (
-                    <li key={i} className="rounded-md border border-slate-200 bg-white p-3">
+                    <li key={i} className="rounded-lg border border-slate-100 p-3">
                       <div className="flex items-start justify-between gap-3">
-                        <p className="text-xs font-bold text-slate-700 leading-snug flex-1">
-                          {i + 1}. {q}
-                        </p>
-                        <span className="shrink-0 rounded-md px-2 py-0.5 text-xs font-bold bg-slate-100 text-slate-700">
+                        <p className="text-xs text-slate-700 flex-1 leading-snug">{i + 1}. {q}</p>
+                        <span className="shrink-0 rounded px-2 py-0.5 text-xs font-bold bg-slate-100 text-slate-700">
                           {result.questionScores?.[i] ?? "—"}/10
                         </span>
                       </div>
                       {result.questionFeedback?.[i] && (
-                        <p className="mt-1.5 text-xs text-slate-500">{result.questionFeedback[i]}</p>
+                        <p className="mt-1 text-xs text-slate-500">{result.questionFeedback[i]}</p>
                       )}
                     </li>
                   ))}
@@ -495,52 +635,46 @@ function SuccessState({ result, onClose }: { result: ApplyResult | null; onClose
           )}
         </div>
       )}
-
       <button type="button" onClick={onClose}
-        className="w-full rounded-md bg-blue-600 px-6 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700">
+        className="w-full rounded-lg bg-blue-600 px-6 py-3 text-sm font-bold text-white hover:bg-blue-700">
         Close
       </button>
     </div>
-  );
-}
-
-function ScoreBadge({ score }: { score: number }) {
-  const color =
-    score >= 75 ? "bg-green-100 text-green-700" :
-    score >= 50 ? "bg-yellow-100 text-yellow-700" :
-    "bg-red-100 text-red-700";
-  return (
-    <span className={`rounded-md px-3 py-1 text-sm font-bold ${color}`}>
-      {score}/100
-    </span>
   );
 }
 
 function RejectedState({ matchResult, onClose }: { matchResult: MatchResult | null; onClose: () => void }) {
   return (
     <div className="space-y-4 py-4 text-center">
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-red-50 text-sm font-bold text-red-700">✕</div>
-      <p className="text-lg font-bold text-slate-950">
-        Your resume does not match the requirements for this position.
-      </p>
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-700 font-bold text-xl">✕</div>
+      <p className="text-base font-bold text-slate-900">Resume does not match this position</p>
       {typeof matchResult?.score === "number" && (
-        <p className="text-sm font-bold text-red-700">Match score: {matchResult.score}/100</p>
+        <p className="text-sm font-bold text-red-600">Match score: {matchResult.score}/100</p>
       )}
-      {matchResult?.reason && (
-        <p className="mx-auto max-w-lg text-sm text-slate-600">{matchResult.reason}</p>
-      )}
-      <p className="text-xs text-slate-500">A rejection email has been sent to your inbox.</p>
+      {matchResult?.reason && <p className="mx-auto max-w-lg text-sm text-slate-600">{matchResult.reason}</p>}
+      <p className="text-xs text-slate-400">A notification has been sent to your inbox.</p>
       <button type="button" onClick={onClose}
-        className="mt-2 rounded-md bg-red-600 px-6 py-2 text-sm font-bold text-white transition-colors hover:bg-red-700">
+        className="rounded-lg bg-red-600 px-6 py-2.5 text-sm font-bold text-white hover:bg-red-700">
         Close
       </button>
     </div>
   );
 }
 
+// ─── Shared components ────────────────────────────────────────────────────────
+
+function ScoreBadge({ score, small }: { score: number; small?: boolean }) {
+  const color = score >= 75 ? "bg-green-100 text-green-700" : score >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700";
+  return (
+    <span className={`rounded-md px-2.5 py-0.5 font-bold ${small ? "text-xs" : "text-sm"} ${color}`}>
+      {score}/100
+    </span>
+  );
+}
+
 function ErrorMsg({ message }: { message: string }) {
   return (
-    <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+    <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
       {message}
     </p>
   );
@@ -552,5 +686,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1.5 block text-xs font-bold text-slate-500">{label}</span>
       {children}
     </label>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
   );
 }

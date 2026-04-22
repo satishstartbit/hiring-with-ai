@@ -196,6 +196,8 @@ export async function POST(
       // Grading failure must not block submission
     }
 
+    const passed = totalScore >= 70;
+
     return Response.json(
       {
         success: true,
@@ -205,6 +207,8 @@ export async function POST(
         questionFeedback,
         totalScore: totalScore || undefined,
         overallFeedback: overallFeedback || undefined,
+        // Signal the UI to show interview scheduling when candidate passed
+        interviewRequired: passed,
       },
       { status: 201 }
     );
