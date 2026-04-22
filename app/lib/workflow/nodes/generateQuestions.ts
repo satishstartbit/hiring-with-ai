@@ -2,6 +2,7 @@ import { z } from "zod";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { createLLM } from "../../groq";
 import { webSearch } from "../../tavily";
+import { traceable } from "langsmith/traceable";
 import type { ScreeningQuestion, ScreeningState } from "../screeningState";
 
 const MCQ_COUNT = 8;
@@ -28,9 +29,8 @@ const QuestionsSchema = z.object({
     .describe(`Array of exactly ${DESC_COUNT} open-ended descriptive questions`),
 });
 
-export async function generateQuestionsNode(
-  state: ScreeningState
-): Promise<Partial<ScreeningState>> {
+export const generateQuestionsNode = traceable(
+  async (state: ScreeningState): Promise<Partial<ScreeningState>> => {
   try {
     const searchContext = await webSearch(
       `${state.jobTitle} ${state.jobDepartment} technical interview questions`,
@@ -104,4 +104,6 @@ export async function generateQuestionsNode(
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
-}
+  },
+  { name: "generate_questions", run_type: "chain", tags: ["screening"] }
+);

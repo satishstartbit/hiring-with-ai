@@ -6,6 +6,7 @@ import { postJobNode } from "./nodes/postJob";
 import { trackCandidatesNode } from "./nodes/trackCandidates";
 import { connectDB } from "../db/connection";
 import WorkflowRun from "../db/models/WorkflowRun";
+import { traceable } from "langsmith/traceable";
 
 type HiringState = typeof HiringStateAnnotation.State;
 
@@ -63,43 +64,46 @@ const workflow = new StateGraph(HiringStateAnnotation)
 
 const compiledGraph = workflow.compile();
 
-export async function runHiringWorkflow(userRequest: string): Promise<{
-  workflowRunId: string;
-  steps: WorkflowStep[];
-  jobId?: string;
-  error?: string;
-}> {
-  await connectDB();
+export const runHiringWorkflow = traceable(
+  async (userRequest: string): Promise<{
+    workflowRunId: string;
+    steps: WorkflowStep[];
+    jobId?: string;
+    error?: string;
+  }> => {
+    await connectDB();
 
-  const initialSteps: WorkflowStep[] = [
-    { name: "Analyze Request", status: "pending" },
-    { name: "Generate Job Description", status: "pending" },
-    { name: "Post Job", status: "pending" },
-    { name: "Open for Applications", status: "pending" },
-  ];
+    const initialSteps: WorkflowStep[] = [
+      { name: "Analyze Request", status: "pending" },
+      { name: "Generate Job Description", status: "pending" },
+      { name: "Post Job", status: "pending" },
+      { name: "Open for Applications", status: "pending" },
+    ];
 
-  const workflowRun = await WorkflowRun.create({
-    userRequest,
-    status: "running",
-    steps: initialSteps,
-  });
+    const workflowRun = await WorkflowRun.create({
+      userRequest,
+      status: "running",
+      steps: initialSteps,
+    });
 
-  const workflowRunId = workflowRun._id.toString();
+    const workflowRunId = workflowRun._id.toString();
 
-  const finalState = await compiledGraph.invoke({
-    userRequest,
-    workflowRunId,
-    steps: initialSteps,
-  });
+    const finalState = await compiledGraph.invoke({
+      userRequest,
+      workflowRunId,
+      steps: initialSteps,
+    });
 
-  if (finalState.error) {
-    await WorkflowRun.findByIdAndUpdate(workflowRunId, { status: "failed" });
-  }
+    if (finalState.error) {
+      await WorkflowRun.findByIdAndUpdate(workflowRunId, { status: "failed" });
+    }
 
-  return {
-    workflowRunId,
-    steps: finalState.steps,
-    jobId: finalState.jobId,
-    error: finalState.error,
-  };
-}
+    return {
+      workflowRunId,
+      steps: finalState.steps,
+      jobId: finalState.jobId,
+      error: finalState.error,
+    };
+  },
+  { name: "hiring_workflow", run_type: "chain", tags: ["hiring"] }
+);

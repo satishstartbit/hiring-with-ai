@@ -1,6 +1,7 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
 import { GradingStateAnnotation } from "./gradingState";
 import { gradeAnswersNode } from "./nodes/gradeAnswers";
+import { traceable } from "langsmith/traceable";
 
 const graph = new StateGraph(GradingStateAnnotation)
   .addNode("gradeAnswers", gradeAnswersNode)
@@ -25,15 +26,16 @@ export interface GradingOutput {
   error?: string;
 }
 
-export async function runGradingWorkflow(
-  input: GradingInput
-): Promise<GradingOutput> {
-  const finalState = await compiledGradingGraph.invoke(input);
-  return {
-    totalScore: finalState.totalScore,
-    questionScores: finalState.questionScores,
-    questionFeedback: finalState.questionFeedback,
-    overallFeedback: finalState.overallFeedback,
-    error: finalState.error,
-  };
-}
+export const runGradingWorkflow = traceable(
+  async (input: GradingInput): Promise<GradingOutput> => {
+    const finalState = await compiledGradingGraph.invoke(input);
+    return {
+      totalScore: finalState.totalScore,
+      questionScores: finalState.questionScores,
+      questionFeedback: finalState.questionFeedback,
+      overallFeedback: finalState.overallFeedback,
+      error: finalState.error,
+    };
+  },
+  { name: "grading_workflow", run_type: "chain", tags: ["grading"] }
+);

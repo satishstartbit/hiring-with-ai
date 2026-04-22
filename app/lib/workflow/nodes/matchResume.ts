@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { createLLM } from "../../groq";
+import { traceable } from "langsmith/traceable";
 import type { ScreeningState } from "../screeningState";
 
 const ACCEPT_THRESHOLD = 60;
@@ -12,9 +13,8 @@ const MatchSchema = z.object({
   reason: z.string().describe("2-3 sentence explanation covering strengths and any gaps"),
 });
 
-export async function matchResumeNode(
-  state: ScreeningState
-): Promise<Partial<ScreeningState>> {
+export const matchResumeNode = traceable(
+  async (state: ScreeningState): Promise<Partial<ScreeningState>> => {
   try {
     const llm = createLLM();
     const structured = llm.withStructuredOutput(MatchSchema, {
@@ -57,4 +57,6 @@ export async function matchResumeNode(
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
-}
+  },
+  { name: "match_resume", run_type: "chain", tags: ["screening"] }
+);

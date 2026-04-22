@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { createLLM } from "../../groq";
+import { traceable } from "langsmith/traceable";
 import type { GradingState } from "../gradingState";
 
 const GradingSchema = z.object({
@@ -20,9 +21,8 @@ const GradingSchema = z.object({
     .describe("2-3 sentence holistic assessment of the candidate's answers"),
 });
 
-export async function gradeAnswersNode(
-  state: GradingState
-): Promise<Partial<GradingState>> {
+export const gradeAnswersNode = traceable(
+  async (state: GradingState): Promise<Partial<GradingState>> => {
   try {
     const llm = createLLM();
     const structured = llm.withStructuredOutput(GradingSchema, {
@@ -89,4 +89,6 @@ export async function gradeAnswersNode(
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
-}
+  },
+  { name: "grade_answers", run_type: "chain", tags: ["grading"] }
+);

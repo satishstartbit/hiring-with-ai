@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { createLLM, getGroqErrorMessage } from "../../groq";
+import { traceable } from "langsmith/traceable";
 import type { HiringState } from "../state";
 
 const AnalysisSchema = z.object({
@@ -17,9 +18,8 @@ const AnalysisSchema = z.object({
   joiningDays: z.number().optional(),
 });
 
-export async function analyzeRequestNode(
-  state: HiringState
-): Promise<Partial<HiringState>> {
+export const analyzeRequestNode = traceable(
+  async (state: HiringState): Promise<Partial<HiringState>> => {
   const steps = state.steps.map((s) =>
     s.name === "Analyze Request" ? { ...s, status: "running" as const } : s
   );
@@ -69,4 +69,6 @@ export async function analyzeRequestNode(
       ),
     };
   }
-}
+  },
+  { name: "analyze_request", run_type: "chain", tags: ["hiring"] }
+);

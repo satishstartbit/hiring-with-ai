@@ -2,6 +2,7 @@ import { StateGraph, START, END } from "@langchain/langgraph";
 import { ScreeningStateAnnotation } from "./screeningState";
 import { matchResumeNode } from "./nodes/matchResume";
 import { generateQuestionsNode } from "./nodes/generateQuestions";
+import { traceable } from "langsmith/traceable";
 
 export type { ScreeningQuestion } from "./screeningState";
 
@@ -49,23 +50,27 @@ export interface QuestionsOutput {
   error?: string;
 }
 
-export async function runMatchWorkflow(input: MatchInput): Promise<MatchOutput> {
-  const finalState = await compiledMatchGraph.invoke(input);
-  return {
-    matched: finalState.isMatch,
-    matchScore: finalState.matchScore,
-    matchReason: finalState.matchReason,
-    error: finalState.error,
-  };
-}
+export const runMatchWorkflow = traceable(
+  async (input: MatchInput): Promise<MatchOutput> => {
+    const finalState = await compiledMatchGraph.invoke(input);
+    return {
+      matched: finalState.isMatch,
+      matchScore: finalState.matchScore,
+      matchReason: finalState.matchReason,
+      error: finalState.error,
+    };
+  },
+  { name: "resume_match_workflow", run_type: "chain", tags: ["screening"] }
+);
 
-export async function runQuestionsWorkflow(
-  input: QuestionsInput
-): Promise<QuestionsOutput> {
-  const finalState = await compiledQuestionsGraph.invoke(input);
-  return {
-    questions: finalState.questions,
-    timeLimitSeconds: SCREENING_TIME_LIMIT_SECONDS,
-    error: finalState.error,
-  };
-}
+export const runQuestionsWorkflow = traceable(
+  async (input: QuestionsInput): Promise<QuestionsOutput> => {
+    const finalState = await compiledQuestionsGraph.invoke(input);
+    return {
+      questions: finalState.questions,
+      timeLimitSeconds: SCREENING_TIME_LIMIT_SECONDS,
+      error: finalState.error,
+    };
+  },
+  { name: "questions_workflow", run_type: "chain", tags: ["screening"] }
+);
