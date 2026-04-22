@@ -4,8 +4,8 @@ function createTransport() {
   const user = process.env.EMAIL_USER?.trim();
   const pass = process.env.EMAIL_PASS?.trim();
 
-  console.log("[createTransport] EMAIL_USER:", user );
-  console.log("[createTransport] EMAIL_PASS:", pass );
+  console.log("[createTransport] EMAIL_USER:", user);
+  console.log("[createTransport] EMAIL_PASS:", pass);
   if (!user || !pass) {
     throw new Error(
       `Email env vars missing: EMAIL_USER=${user ? "set" : "missing"}, EMAIL_PASS=${pass ? "set" : "missing"}`
@@ -33,7 +33,9 @@ interface ResumeRejectedParams {
 export async function sendResumeRejectedEmail(params: ResumeRejectedParams) {
   const { to, candidateName, jobTitle, matchScore, matchReason } = params;
   const transporter = createTransport();
-  await transporter.sendMail({
+
+  console.log("[sendResumeRejectedEmail] Sending resume rejected email to:", to, FROM);
+  const sent = await transporter.sendMail({
     from: FROM,
     to,
     subject: `Application Update — ${jobTitle}`,
@@ -52,6 +54,8 @@ export async function sendResumeRejectedEmail(params: ResumeRejectedParams) {
       </div>
     `,
   });
+  console.log(`[email] Resume rejected email sent to ${to}: ${sent.messageId}`, sent);
+
 }
 
 interface ScreeningResultParams {
@@ -82,9 +86,9 @@ export async function sendScreeningResultEmail(params: ScreeningResultParams) {
           ${overallFeedback ? `<p style="margin:10px 0 0;font-size:13px;color:#475569">${overallFeedback}</p>` : ""}
         </div>
         ${passed
-          ? `<p style="font-size:14px;color:#475569">Our team will review your full application and reach out if there are next steps.</p>`
-          : `<p style="font-size:14px;color:#475569">Unfortunately, a score of 70 or above is required to advance. We appreciate your effort and encourage you to apply for future openings.</p>`
-        }
+        ? `<p style="font-size:14px;color:#475569">Our team will review your full application and reach out if there are next steps.</p>`
+        : `<p style="font-size:14px;color:#475569">Unfortunately, a score of 70 or above is required to advance. We appreciate your effort and encourage you to apply for future openings.</p>`
+      }
         <p style="font-size:14px;color:#475569">Best regards,<br/>The Hiring Team</p>
       </div>
     `,
