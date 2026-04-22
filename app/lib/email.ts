@@ -4,6 +4,8 @@ function createTransport() {
   const user = process.env.EMAIL_USER?.trim();
   const pass = process.env.EMAIL_PASS?.trim();
 
+  console.log("[createTransport] EMAIL_USER:", user );
+  console.log("[createTransport] EMAIL_PASS:", pass );
   if (!user || !pass) {
     throw new Error(
       `Email env vars missing: EMAIL_USER=${user ? "set" : "missing"}, EMAIL_PASS=${pass ? "set" : "missing"}`
@@ -18,7 +20,7 @@ function createTransport() {
   });
 }
 
-const FROM = process.env.EMAIL_FROM ?? `Hiring Team <${process.env.EMAIL_USER}>`;
+const FROM = process.env.EMAIL_FROM ?? `Hiring Team <sam2021choudhary2021@gmail.com>`;
 
 interface ResumeRejectedParams {
   to: string;

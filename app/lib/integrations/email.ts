@@ -33,7 +33,7 @@ export async function sendOutreachEmail(
   }
 
   const transport = createTransport();
-  const from = process.env.EMAIL_FROM || `"Hiring Team" <${process.env.EMAIL_USER}>`;
+  const from = process.env.EMAIL_FROM || `"Hiring Team" <sam2021choudhary2021@gmail.com>`;
 
   const result = await transport.sendMail({
     from,
