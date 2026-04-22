@@ -100,7 +100,7 @@ export async function POST(
     }
 
     if (!result.matched) {
-      sendResumeRejectedEmail({
+      await sendResumeRejectedEmail({
         to: email,
         candidateName: name,
         jobTitle: job.title,
