@@ -185,7 +185,7 @@ export async function POST(
         overallFeedback,
       });
 
-      sendScreeningResultEmail({
+      await sendScreeningResultEmail({
         to: email,
         candidateName: name,
         jobTitle: job.title,
