@@ -91,4 +91,4 @@ export const gradeAnswersNode = traceable(
   }
   },
   { name: "grade_answers", run_type: "chain", tags: ["grading"] }
-);
+) as (state: GradingState) => Promise<Partial<GradingState>>;

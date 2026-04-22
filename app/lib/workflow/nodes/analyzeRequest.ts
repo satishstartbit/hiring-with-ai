@@ -71,4 +71,4 @@ export const analyzeRequestNode = traceable(
   }
   },
   { name: "analyze_request", run_type: "chain", tags: ["hiring"] }
-);
+) as (state: HiringState) => Promise<Partial<HiringState>>;

@@ -59,4 +59,4 @@ export const matchResumeNode = traceable(
   }
   },
   { name: "match_resume", run_type: "chain", tags: ["screening"] }
-);
+) as (state: ScreeningState) => Promise<Partial<ScreeningState>>;

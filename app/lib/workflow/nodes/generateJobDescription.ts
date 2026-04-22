@@ -68,4 +68,4 @@ Key requirements: ${(state.requirements ?? []).join(", ")}${marketSection}`),
     }
   },
   { name: "generate_job_description", run_type: "chain", tags: ["hiring"] }
-);
+) as (state: HiringState) => Promise<Partial<HiringState>>;

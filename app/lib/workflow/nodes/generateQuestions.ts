@@ -106,4 +106,4 @@ export const generateQuestionsNode = traceable(
   }
   },
   { name: "generate_questions", run_type: "chain", tags: ["screening"] }
-);
+) as (state: ScreeningState) => Promise<Partial<ScreeningState>>;
