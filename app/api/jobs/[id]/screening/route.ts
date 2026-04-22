@@ -93,6 +93,8 @@ export async function POST(
       resumeText,
     });
 
+    console.log(`result`,result);
+
     if (result.error) {
       return Response.json({ error: result.error }, { status: 502 });
     }
