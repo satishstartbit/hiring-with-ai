@@ -4,12 +4,37 @@ import { getJobSummaries } from "../lib/data/hiring";
 
 export const dynamic = "force-dynamic";
 
-export default async function JobsPage() {
-  const jobs = await getJobSummaries();
-  const activeJobs = jobs.filter((job) => job.status === "active").length;
-  const draftJobs = jobs.filter((job) => job.status === "draft").length;
-  const totalApplicants = jobs.reduce((sum, job) => sum + job.applicantCount, 0);
-  const newestJob = jobs[0];
+const PAGE_SIZE = 3;
+
+export default async function JobsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string; query?: string }>;
+}) {
+  const { page: pageParam, query: queryParam } = await searchParams;
+  const allJobs = await getJobSummaries();
+  const query = queryParam?.trim() ?? "";
+  const jobs = query
+    ? allJobs.filter((job) => {
+        const q = query.toLowerCase();
+        return (
+          job.title.toLowerCase().includes(q) ||
+          (job.department ?? "").toLowerCase().includes(q) ||
+          (job.location ?? "").toLowerCase().includes(q) ||
+          job.status.toLowerCase().includes(q)
+        );
+      })
+    : allJobs;
+
+  const currentPage = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
+  const totalPages = Math.max(1, Math.ceil(jobs.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pagedJobs = jobs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const activeJobs = allJobs.filter((job) => job.status === "active").length;
+  const draftJobs = allJobs.filter((job) => job.status === "draft").length;
+  const totalApplicants = allJobs.reduce((sum, job) => sum + job.applicantCount, 0);
+  const newestJob = allJobs[0];
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:py-8">
@@ -71,7 +96,7 @@ export default async function JobsPage() {
       </section>
 
       <section className="my-6 grid gap-4 sm:grid-cols-3">
-        <Metric label="Total positions" value={jobs.length} color="slate" />
+        <Metric label="Total positions" value={allJobs.length} color="slate" />
         <Metric label="Active positions" value={activeJobs} color="blue" />
         <Metric label="Total applicants" value={totalApplicants} color="red" />
       </section>
@@ -94,22 +119,108 @@ export default async function JobsPage() {
         </section>
       ) : (
         <section>
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h2 className="text-lg font-bold text-slate-950">Position directory</h2>
               <p className="text-sm text-slate-600">
                 Active roles appear first based on newest workflow activity.
               </p>
             </div>
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-              {jobs.length} {jobs.length === 1 ? "role" : "roles"}
-            </p>
+            <div className="flex items-center gap-3">
+              <form action="/jobs" method="GET" className="flex items-center gap-2">
+                <div className="relative">
+                  <svg
+                    className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"
+                    />
+                  </svg>
+                  <input
+                    type="text"
+                    name="query"
+                    defaultValue={query}
+                    placeholder="Search roles…"
+                    className="h-9 rounded-md border border-slate-200 bg-white pl-8 pr-3 text-sm text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 w-52"
+                  />
+                </div>
+                {query && (
+                  <Link
+                    href="/jobs"
+                    className="text-xs font-medium text-slate-500 hover:text-slate-800"
+                  >
+                    Clear
+                  </Link>
+                )}
+              </form>
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500 whitespace-nowrap">
+                {jobs.length} {jobs.length === 1 ? "role" : "roles"}
+                {query ? " found" : ""}
+              </p>
+            </div>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {jobs.map((job) => (
+            {pagedJobs.map((job) => (
               <JobCard key={job._id} job={job} />
             ))}
           </div>
+          {jobs.length === 0 && query && (
+            <p className="py-10 text-center text-sm text-slate-500">
+              No roles match &ldquo;{query}&rdquo;.{" "}
+              <Link href="/jobs" className="font-medium text-blue-600 hover:underline">
+                Clear search
+              </Link>
+            </p>
+          )}
+          {totalPages > 1 && (
+            <div className="mt-6 flex items-center justify-between">
+              <p className="text-sm text-slate-500">
+                Page {safePage} of {totalPages}
+              </p>
+              <div className="flex gap-2">
+                {safePage > 1 ? (
+                  <Link
+                    href={`/jobs?page=${safePage - 1}${query ? `&query=${encodeURIComponent(query)}` : ""}`}
+                    className="inline-flex items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    ← Previous
+                  </Link>
+                ) : (
+                  <span className="inline-flex items-center rounded-md border border-slate-100 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-300 cursor-not-allowed">
+                    ← Previous
+                  </span>
+                )}
+                <div className="flex gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                    <Link
+                      key={p}
+                      href={`/jobs?page=${p}${query ? `&query=${encodeURIComponent(query)}` : ""}`}
+                      className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium ${
+                        p === safePage
+                          ? "bg-blue-600 text-white"
+                          : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      {p}
+                    </Link>
+                  ))}
+                </div>
+                {safePage < totalPages ? (
+                  <Link
+                    href={`/jobs?page=${safePage + 1}${query ? `&query=${encodeURIComponent(query)}` : ""}`}
+                    className="inline-flex items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Next →
+                  </Link>
+                ) : (
+                  <span className="inline-flex items-center rounded-md border border-slate-100 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-300 cursor-not-allowed">
+                    Next →
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </section>
       )}
     </main>
