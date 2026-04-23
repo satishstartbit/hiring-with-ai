@@ -5,11 +5,12 @@ import InterviewSession from "../../../../lib/db/models/InterviewSession";
 import Candidate from "../../../../lib/db/models/Candidate";
 import { runGradeInterview } from "../../../../lib/workflow/interviewGraph";
 import { sendInterviewResultEmail } from "../../../../lib/email";
+import { isInterviewPassed } from "../../../../lib/interviewConfig";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   const { sessionId } = await params;
@@ -51,7 +52,7 @@ export async function POST(
   });
 
   await Candidate.findByIdAndUpdate(session.candidateId, {
-    status: result.totalScore >= 70 ? "offer" : "reviewing",
+    status: isInterviewPassed(result.totalScore) ? "offer" : "reviewing",
   });
 
   await sendInterviewResultEmail({

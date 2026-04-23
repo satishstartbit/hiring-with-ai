@@ -46,8 +46,8 @@ export const matchResumeNode = traceable(
     ]);
 
     const rawText = typeof response.content === "string" ? response.content : "";
-    const jsonStr = rawText.replace(/^```(?:json)?\s*/m, "").replace(/\s*```$/m, "").trim();
-    const result = MatchSchema.parse(JSON.parse(jsonStr));
+    const jsonMatch = /\{[\s\S]*\}/.exec(rawText);
+    const result = MatchSchema.parse(JSON.parse(jsonMatch ? jsonMatch[0] : rawText));
 
     // Score ≥ 60 is the acceptance rule regardless of any LLM boolean flag
     const isMatch = result.score >= ACCEPT_THRESHOLD;

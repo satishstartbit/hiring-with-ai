@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import {
+  INTERVIEW_PASSING_SCORE,
+  INTERVIEW_QUESTION_COUNT,
+  isInterviewPassed,
+} from "../lib/interviewConfig";
 
 interface BrowserSpeechRecognitionAlternative {
   transcript: string;
@@ -85,7 +90,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [session, setSession] = useState<SessionData | null>(null);
   const [currentQIdx, setCurrentQIdx] = useState(0);
-  const [totalQuestions, setTotalQuestions] = useState(5);
+  const [totalQuestions, setTotalQuestions] = useState(INTERVIEW_QUESTION_COUNT);
   const [aiText, setAiText] = useState("");
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -307,7 +312,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
         return;
       }
 
-      setTotalQuestions(data.totalQuestions ?? 5);
+      setTotalQuestions(data.totalQuestions ?? INTERVIEW_QUESTION_COUNT);
       setCurrentQIdx(data.currentQuestionIndex ?? 0);
       setAiText(data.firstMessage);
       setPhase("ai_speaking");
@@ -424,7 +429,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   }
 
   if (phase === "completed" && result) {
-    const passed = result.totalScore >= 30;
+    const passed = isInterviewPassed(result.totalScore);
     const resumeScore = session?.resumeMatchScore;
     const quizScore = session?.answerScore;
     return (
@@ -438,6 +443,9 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
             </p>
             <p className="text-5xl font-bold text-white">
               {result.totalScore}<span className="text-xl text-slate-400">/100</span>
+            </p>
+            <p className="text-xs text-slate-500">
+              Passing score: {INTERVIEW_PASSING_SCORE}/100
             </p>
             {result.overallFeedback && (
               <p className="text-sm text-slate-300 max-w-sm mx-auto leading-relaxed">{result.overallFeedback}</p>
@@ -555,7 +563,9 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           ) : (
             <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-5 text-center space-y-2">
               <p className="text-sm text-slate-400">Thank you for completing the interview.</p>
-              <p className="text-xs text-slate-500">We appreciate your time. Results have been emailed to you.</p>
+              <p className="text-xs text-slate-500">
+                We appreciate your time. A minimum score of {INTERVIEW_PASSING_SCORE}/100 is needed to pass.
+              </p>
               <Link href="/jobs"
                 className="mt-2 inline-block rounded-lg bg-slate-700 px-5 py-2 text-sm font-bold text-white hover:bg-slate-600 transition-colors">
                 Browse Other Positions
@@ -576,7 +586,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           <div>
             <p className="text-2xl font-bold text-white">{session?.jobTitle ?? "AI Interview"}</p>
             <p className="text-sm text-slate-400 mt-1">
-              Hi {session?.candidateName ?? ""} — 5 questions, take your time
+              Hi {session?.candidateName ?? ""} — {totalQuestions} questions, take your time
             </p>
           </div>
 

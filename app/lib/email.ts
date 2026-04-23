@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { INTERVIEW_PASSING_SCORE, isInterviewPassed } from "./interviewConfig";
 
 function createTransport() {
   const user = process.env.EMAIL_USER?.trim();
@@ -156,7 +157,7 @@ interface InterviewResultParams {
 
 export async function sendInterviewResultEmail(params: InterviewResultParams) {
   const { to, candidateName, jobTitle, totalScore, overallFeedback, questions, questionScores, questionFeedback } = params;
-  const passed = totalScore >= 70;
+  const passed = isInterviewPassed(totalScore);
   const transporter = createTransport();
 
   const questionRows = questions
@@ -196,7 +197,7 @@ export async function sendInterviewResultEmail(params: InterviewResultParams) {
         </table>
         ${passed
           ? `<p style="font-size:14px;color:#475569;margin-top:16px">Our team will be in touch with next steps shortly. Well done!</p>`
-          : `<p style="font-size:14px;color:#475569;margin-top:16px">We appreciate your effort and encourage you to apply for future openings.</p>`
+          : `<p style="font-size:14px;color:#475569;margin-top:16px">We appreciate your effort. A score of ${INTERVIEW_PASSING_SCORE}/100 is required to pass this interview.</p>`
         }
         <p style="font-size:14px;color:#475569">Best regards,<br/>The Hiring Team</p>
       </div>

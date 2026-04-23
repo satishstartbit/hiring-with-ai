@@ -65,8 +65,8 @@ export const gradeAnswersNode = traceable(
     ]);
 
     const rawText = typeof response.content === "string" ? response.content : "";
-    const jsonStr = rawText.replace(/^```(?:json)?\s*/m, "").replace(/\s*```$/m, "").trim();
-    const result = GradingSchema.parse(JSON.parse(jsonStr));
+    const jsonMatch = /\{[\s\S]*\}/.exec(rawText);
+    const result = GradingSchema.parse(JSON.parse(jsonMatch ? jsonMatch[0] : rawText));
 
     const count = state.questions.length;
 

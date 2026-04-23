@@ -1,7 +1,12 @@
 import { ChatGroq } from "@langchain/groq";
 
 export const GROQ_MODEL = "llama-3.1-8b-instant";
-export function createLLM() {
+
+interface LLMOptions {
+  temperature?: number;
+}
+
+export function createLLM(options: LLMOptions = {}) {
   const apiKey = process.env.GROQ_API_KEY?.trim();
 
   if (!apiKey) {
@@ -11,7 +16,7 @@ export function createLLM() {
   return new ChatGroq({
     model: GROQ_MODEL,
     apiKey,
-    temperature: 0,
+    temperature: options.temperature ?? 0,
   });
 }
 
