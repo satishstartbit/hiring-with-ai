@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, use } from "react";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import ApplicantsTable from "../../components/ApplicantsTable";
+import ApplyJobButton from "../../components/ApplyJobButton";
 
 interface Job {
   _id: string;
@@ -140,18 +141,21 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         </nav>
 
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
               <h1 className="text-2xl font-bold text-slate-950">{job.title}</h1>
               <p className="mt-1 text-sm text-slate-600">
                 {job.department} • {job.location} • {job.type}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-3">
               <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold capitalize ${statusStyle.badge}`}>
                 <span className={`h-1.5 w-1.5 rounded-full ${statusStyle.dot}`} />
                 {job.status}
               </span>
+              {job.status === "active" && (
+                <ApplyJobButton jobId={job._id} jobTitle={job.title} />
+              )}
             </div>
           </div>
         </div>

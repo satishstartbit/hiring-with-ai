@@ -20,6 +20,7 @@ interface Candidate {
   resumeFilename?: string;
   resumeMatchScore?: number;
   answerScore?: number;
+  interviewScore?: number;
   screeningAnswers?: string[];
   appliedAt?: string;
   createdAt: string;
@@ -117,16 +118,18 @@ export default function ApplicantsTable({
                   <th className="px-4 py-3">Resume</th>
                   <th className="px-4 py-3">Resume Score</th>
                   <th className="px-4 py-3">Quiz Score</th>
+                  <th className="px-4 py-3">Interview Score</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-6 py-3 text-right">Applied</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {candidates.map((candidate) => {
-                  const resumeScore = typeof candidate.resumeMatchScore === "number" ? candidate.resumeMatchScore : null;
-                  const quizScore = typeof candidate.answerScore === "number" ? candidate.answerScore : null;
-                  const candidateStatusStyle =
+                  const statusStyle =
                     CANDIDATE_STATUS_STYLES[candidate.status] ?? CANDIDATE_STATUS_STYLES.applied;
+                  const roleBase = candidate.currentTitle ?? "";
+                  const company = candidate.currentCompany ? ` · ${candidate.currentCompany}` : "";
+                  const role = roleBase ? roleBase + company : null;
                   return (
                     <tr key={candidate._id} className="transition-colors hover:bg-slate-50/60">
                       <td className="px-6 py-4">
@@ -134,9 +137,7 @@ export default function ApplicantsTable({
                         <p className="mt-0.5 text-xs text-slate-500">{candidate.email}</p>
                       </td>
                       <td className="px-4 py-4 text-slate-600">
-                        {candidate.currentTitle
-                          ? `${candidate.currentTitle}${candidate.currentCompany ? ` · ${candidate.currentCompany}` : ""}`
-                          : <span className="text-slate-400">Not provided</span>}
+                        {role ?? <span className="text-slate-400">Not provided</span>}
                       </td>
                       <td className="px-4 py-4">
                         {candidate.resumeFilename ? (
@@ -159,56 +160,17 @@ export default function ApplicantsTable({
                         )}
                       </td>
                       <td className="px-4 py-4">
-                        {resumeScore !== null ? (
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
-                                <div
-                                  className={`h-full rounded-full transition-all ${
-                                    resumeScore >= 75 ? "bg-emerald-500" : resumeScore >= 50 ? "bg-amber-400" : "bg-red-400"
-                                  }`}
-                                  style={{ width: `${resumeScore}%` }}
-                                />
-                              </div>
-                              <span className={`text-xs font-bold tabular-nums ${
-                                resumeScore >= 75 ? "text-emerald-700" : resumeScore >= 50 ? "text-amber-700" : "text-red-700"
-                              }`}>
-                                {resumeScore}/100
-                              </span>
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-slate-400">Not scored</span>
-                        )}
+                        <ScoreCell score={candidate.resumeMatchScore} emptyLabel="Not scored" />
                       </td>
                       <td className="px-4 py-4">
-                        {quizScore !== null ? (
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
-                                <div
-                                  className={`h-full rounded-full transition-all ${
-                                    quizScore >= 75 ? "bg-emerald-500" : quizScore >= 50 ? "bg-amber-400" : "bg-red-400"
-                                  }`}
-                                  style={{ width: `${quizScore}%` }}
-                                />
-                              </div>
-                              <span className={`text-xs font-bold tabular-nums ${
-                                quizScore >= 75 ? "text-emerald-700" : quizScore >= 50 ? "text-amber-700" : "text-red-700"
-                              }`}>
-                                {quizScore}/100
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-400">
-                              {candidate.screeningAnswers?.length ?? 0} answers
-                            </p>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-slate-400">Not taken</span>
-                        )}
+                        <ScoreCell score={candidate.answerScore} emptyLabel="Not taken"
+                          sub={`${candidate.screeningAnswers?.length ?? 0} answers`} />
                       </td>
                       <td className="px-4 py-4">
-                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-bold capitalize ${candidateStatusStyle}`}>
+                        <ScoreCell score={candidate.interviewScore} emptyLabel="No interview" />
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-bold capitalize ${statusStyle}`}>
                           {candidate.status}
                         </span>
                       </td>
@@ -290,6 +252,44 @@ export default function ApplicantsTable({
         </>
       )}
     </section>
+  );
+}
+
+function scoreBarColor(score: number) {
+  if (score >= 75) return "bg-emerald-500";
+  if (score >= 50) return "bg-amber-400";
+  return "bg-red-400";
+}
+
+function scoreTextColor(score: number) {
+  if (score >= 75) return "text-emerald-700";
+  if (score >= 50) return "text-amber-700";
+  return "text-red-700";
+}
+
+function ScoreCell({ score, emptyLabel, sub }: {
+  readonly score: number | undefined;
+  readonly emptyLabel: string;
+  readonly sub?: string;
+}) {
+  if (score === undefined || score === null) {
+    return <span className="text-xs text-slate-400">{emptyLabel}</span>;
+  }
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
+          <div
+            className={`h-full rounded-full transition-all ${scoreBarColor(score)}`}
+            style={{ width: `${score}%` }}
+          />
+        </div>
+        <span className={`text-xs font-bold tabular-nums ${scoreTextColor(score)}`}>
+          {score}/100
+        </span>
+      </div>
+      {sub && <p className="text-xs text-slate-400">{sub}</p>}
+    </div>
   );
 }
 

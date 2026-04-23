@@ -215,9 +215,8 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
       if (!res.ok) { setError(data.error || "Scheduling failed"); return; }
 
       if (data.immediate && data.meetingUrl) {
-        // Redirect directly to the video interview room
-        window.open(data.meetingUrl, "_blank");
-        setStage("success");
+        window.location.href = data.meetingUrl;
+        return;
       } else if (data.scheduledAt) {
         const d = new Date(data.scheduledAt);
         const label = d.toLocaleString("en-US", {
@@ -632,8 +631,6 @@ function SuccessState({
           {scheduledConfirmation.meetingUrl && (
           <a
             href={scheduledConfirmation.meetingUrl}
-            target="_blank"
-            rel="noopener noreferrer"
             className="mt-2 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700"
           >
             Join AI Interview →

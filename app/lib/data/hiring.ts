@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { connectDB } from "../db/connection";
 import Candidate from "../db/models/Candidate";
 import Job from "../db/models/Job";
+import InterviewSession from "../db/models/InterviewSession";
 
 export interface JobSummary {
   _id: string;
@@ -34,6 +35,7 @@ export interface CandidateSummary {
   resumeMatchScore?: number;
   resumeMatchReason?: string;
   answerScore?: number;
+  interviewScore?: number;
   screeningTimeLimitSeconds?: number;
   appliedAt?: string;
   createdAt: string;
@@ -190,4 +192,38 @@ export async function getCandidates(
     page,
     totalPages,
   };
+}
+
+// Returns all candidates for a job (no pagination) with their latest interview score.
+export async function getCandidatesForJob(jobId: string): Promise<CandidateSummary[]> {
+  if (!mongoose.isValidObjectId(jobId)) return [];
+  await connectDB();
+
+  const raw = (await Candidate.find({ jobId: new mongoose.Types.ObjectId(jobId) })
+    .select("-resumeData")
+    .sort({ createdAt: -1 })
+    .lean()) as unknown as LeanCandidate[];
+
+  const candidateIds = raw.map((c) => c._id);
+
+  type LeanSession = { candidateId: mongoose.Types.ObjectId; totalScore?: number };
+  const sessions = (await InterviewSession.find({
+    candidateId: { $in: candidateIds },
+    status: "completed",
+  })
+    .select("candidateId totalScore")
+    .lean()) as unknown as LeanSession[];
+
+  const scoreMap = new Map<string, number>();
+  for (const s of sessions) {
+    if (s.totalScore === undefined) continue;
+    const cid = s.candidateId.toString();
+    const existing = scoreMap.get(cid);
+    if (existing === undefined || s.totalScore > existing) scoreMap.set(cid, s.totalScore);
+  }
+
+  return raw.map((c) => ({
+    ...serializeCandidate(c),
+    interviewScore: scoreMap.get(c._id.toString()),
+  }));
 }

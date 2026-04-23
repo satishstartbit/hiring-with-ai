@@ -36,9 +36,9 @@ type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
 
 type Phase =
   | "loading"
-  | "waiting"       // scheduled for future
-  | "permission"    // requesting cam/mic
-  | "ready"         // ready to start
+  | "waiting"
+  | "permission"
+  | "ready"
   | "ai_speaking"
   | "listening"
   | "processing"
@@ -58,6 +58,8 @@ interface SessionData {
   overallFeedback?: string;
   questionScores?: number[];
   questionFeedback?: string[];
+  resumeMatchScore?: number;
+  answerScore?: number;
 }
 
 interface InterviewResult {
@@ -68,15 +70,13 @@ interface InterviewResult {
 }
 
 const SILENCE_TIMEOUT_MS = 2500;
-const INTERVIEW_DURATION_MINUTES = 3;
-const INTERVIEW_DURATION_MS = INTERVIEW_DURATION_MINUTES * 60 * 1000;
 const MIN_WORDS = 10;
 
 export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [session, setSession] = useState<SessionData | null>(null);
   const [currentQIdx, setCurrentQIdx] = useState(0);
-  const [totalQuestions, setTotalQuestions] = useState(3);
+  const [totalQuestions, setTotalQuestions] = useState(5);
   const [aiText, setAiText] = useState("");
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -90,22 +90,30 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   const streamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const interviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const forceCompleteRef = useRef(false);
   const accumulatedRef = useRef("");
+  // Ref so startListening can call submitAnswer without a circular useCallback dependency
+  const submitAnswerRef = useRef<(answer: string) => void>(() => {});
 
-  function clearInterviewTimer() {
-    if (interviewTimerRef.current) {
-      clearTimeout(interviewTimerRef.current);
-      interviewTimerRef.current = null;
+  // ── Load session ────────────────────────────────────────────────────────────
+  // ── Camera / Mic ─────────────────────────────────────────────────────────────
+  const startCamera = useCallback(async () => {
+    setPhase("permission");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      streamRef.current = stream;
+      if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.muted = true; }
+    } catch {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+        setIsCamEnabled(false);
+      } catch {
+        setIsCamEnabled(false);
+      }
     }
-  }
-
-  useEffect(() => {
-    return () => clearInterviewTimer();
+    setPhase("ready");
   }, []);
 
-  // ── Load session ──────────────────────────────────────────────────────────
   useEffect(() => {
     fetch(`/api/interview/${sessionId}`)
       .then((r) => r.json())
@@ -121,46 +129,18 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           });
           setPhase("completed");
         } else {
-          setPhase("permission");
+          void startCamera();
         }
       })
       .catch(() => { setErrorMsg("Failed to load session."); setPhase("error"); });
-  }, [sessionId]);
-
-  // ── Camera / Mic ──────────────────────────────────────────────────────────
-  const startCamera = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.muted = true;
-      }
-      setPhase("ready");
-    } catch {
-      // Try audio only
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        streamRef.current = stream;
-        setIsCamEnabled(false);
-        setPhase("ready");
-      } catch {
-        setIsCamEnabled(false);
-        setPhase("ready");
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (phase === "permission") startCamera();
-  }, [phase, startCamera]);
+  }, [sessionId, startCamera]);
 
   function stopCamera() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
   }
 
-  // ── Speech Synthesis (AI speaks) ──────────────────────────────────────────
+  // ── Speech Synthesis ──────────────────────────────────────────────────────────
   const speakText = useCallback((text: string, onEnd: () => void) => {
     if (!("speechSynthesis" in window)) { onEnd(); return; }
     window.speechSynthesis.cancel();
@@ -174,25 +154,41 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
     utterance.pitch = 1.05;
     utterance.volume = 1;
     const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find((v) => v.name.toLowerCase().includes("female") || v.name.includes("Samantha") || v.name.includes("Karen") || v.name.includes("Zira"));
+    const preferred = voices.find(
+      (v) => v.name.toLowerCase().includes("female") || v.name.includes("Samantha") || v.name.includes("Karen") || v.name.includes("Zira")
+    );
     if (preferred) utterance.voice = preferred;
-    utterance.onend = onEnd;
     utterance.onerror = () => onEnd();
     setIsSpeaking(true);
     utterance.onend = () => { setIsSpeaking(false); onEnd(); };
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  // ── Speech Recognition (user speaks) ─────────────────────────────────────
+  // ── Grade interview ───────────────────────────────────────────────────────────
+  // Declared before submitAnswer so submitAnswer can call it directly.
+  const gradeInterview = useCallback(async () => {
+    setPhase("grading");
+    try {
+      const res = await fetch(`/api/interview/${sessionId}/complete`, { method: "POST" });
+      const data: InterviewResult & { error?: string } = await res.json();
+      if (data.error) { setErrorMsg(data.error); setPhase("error"); return; }
+      setResult(data);
+      stopCamera();
+      setPhase("completed");
+    } catch {
+      setErrorMsg("Failed to grade interview.");
+      setPhase("error");
+    }
+  }, [sessionId]);
+
+  // ── Speech Recognition ────────────────────────────────────────────────────────
+  // Uses submitAnswerRef so it doesn't depend on submitAnswer directly.
   const startListening = useCallback(() => {
     const SpeechRecognitionAPI =
       (window as unknown as { SpeechRecognition?: BrowserSpeechRecognitionConstructor; webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor }).SpeechRecognition ??
       (window as unknown as { SpeechRecognition?: BrowserSpeechRecognitionConstructor; webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor }).webkitSpeechRecognition;
 
-    if (!SpeechRecognitionAPI) {
-      setPhase("listening");
-      return;
-    }
+    if (!SpeechRecognitionAPI) { setPhase("listening"); return; }
 
     accumulatedRef.current = "";
     setTranscript("");
@@ -207,41 +203,31 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const t = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          accumulatedRef.current += t + " ";
-        } else {
-          interim += t;
-        }
+        if (event.results[i].isFinal) { accumulatedRef.current += t + " "; }
+        else { interim += t; }
       }
       setTranscript(accumulatedRef.current);
       setInterimTranscript(interim);
-
-      // Reset silence timer on new speech
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = setTimeout(() => {
-        rec.stop();
-      }, SILENCE_TIMEOUT_MS);
+      silenceTimerRef.current = setTimeout(() => rec.stop(), SILENCE_TIMEOUT_MS);
     };
 
     rec.onend = () => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       setInterimTranscript("");
       const finalText = accumulatedRef.current.trim();
-      if (finalText && !forceCompleteRef.current) submitAnswer(finalText);
+      if (finalText) submitAnswerRef.current(finalText);
     };
 
-    rec.onerror = () => {
-      setPhase("listening");
-    };
+    rec.onerror = () => setPhase("listening");
 
     recognitionRef.current = rec;
     rec.start();
     setPhase("listening");
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
-  // ── Send answer to API ────────────────────────────────────────────────────
+  // ── Send answer to API ────────────────────────────────────────────────────────
   const submitAnswer = useCallback(async (answer: string) => {
-    if (forceCompleteRef.current) return;
     if (!answer.trim()) { startListening(); return; }
     setPhase("processing");
     setTranscript("");
@@ -272,9 +258,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
 
       if (data.isComplete) {
         setPhase("ai_speaking");
-        speakText(data.aiReply, () => {
-          gradeInterview();
-        });
+        speakText(data.aiReply, () => gradeInterview());
       } else {
         setPhase("ai_speaking");
         speakText(data.aiReply, () => startListening());
@@ -283,38 +267,12 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       setErrorMsg("Network error. Please try again.");
       setPhase("error");
     }
-  }, [sessionId, currentQIdx, speakText, startListening]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId, currentQIdx, speakText, startListening, gradeInterview]);
 
-  // ── Grade interview ───────────────────────────────────────────────────────
-  const gradeInterview = useCallback(async () => {
-    clearInterviewTimer();
-    setPhase("grading");
-    try {
-      const res = await fetch(`/api/interview/${sessionId}/complete`, { method: "POST" });
-      const data: InterviewResult & { error?: string } = await res.json();
-      if (data.error) { setErrorMsg(data.error); setPhase("error"); return; }
-      setResult(data);
-      stopCamera();
-      setPhase("completed");
-    } catch {
-      setErrorMsg("Failed to grade interview.");
-      setPhase("error");
-    }
-  }, [sessionId]);
+  // Keep the ref current so startListening always calls the latest submitAnswer
+  useEffect(() => { submitAnswerRef.current = submitAnswer; }, [submitAnswer]);
 
-  const startInterviewTimer = useCallback(() => {
-    clearInterviewTimer();
-    forceCompleteRef.current = false;
-    interviewTimerRef.current = setTimeout(() => {
-      forceCompleteRef.current = true;
-      recognitionRef.current?.stop();
-      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-      setAiText("Time is up. Thank you for completing your 3-minute AI interview.");
-      gradeInterview();
-    }, INTERVIEW_DURATION_MS);
-  }, [gradeInterview]);
-
-  // ── Start interview ───────────────────────────────────────────────────────
+  // ── Start interview ───────────────────────────────────────────────────────────
   const startInterview = useCallback(async () => {
     setPhase("processing");
     try {
@@ -332,19 +290,18 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
         return;
       }
 
-      setTotalQuestions(data.totalQuestions ?? 3);
+      setTotalQuestions(data.totalQuestions ?? 5);
       setCurrentQIdx(data.currentQuestionIndex ?? 0);
       setAiText(data.firstMessage);
-      startInterviewTimer();
       setPhase("ai_speaking");
       speakText(data.firstMessage, () => startListening());
     } catch {
       setErrorMsg("Failed to start interview.");
       setPhase("error");
     }
-  }, [sessionId, speakText, startListening, startInterviewTimer]);
+  }, [sessionId, speakText, startListening]);
 
-  // ── Toggle cam/mic ────────────────────────────────────────────────────────
+  // ── Toggle cam/mic ────────────────────────────────────────────────────────────
   function toggleCamera() {
     streamRef.current?.getVideoTracks().forEach((t) => { t.enabled = !t.enabled; });
     setIsCamEnabled((v) => !v);
@@ -355,7 +312,6 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
     setIsMicEnabled((v) => !v);
   }
 
-  // ── Manual submit (fallback for no speech recognition) ───────────────────
   function handleManualSubmit() {
     const text = transcript.trim();
     if (!text) return;
@@ -363,11 +319,17 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
     submitAnswer(text);
   }
 
+  function handleSkip() {
+    if (recognitionRef.current) recognitionRef.current.stop();
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    setTranscript("");
+    setInterimTranscript("");
+    submitAnswer("skip");
+  }
+
   const progress = totalQuestions > 0 ? (currentQIdx / totalQuestions) * 100 : 0;
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   if (phase === "loading") {
     return <FullScreen><LoadingSpinner label="Loading interview…" /></FullScreen>;
@@ -400,32 +362,59 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
 
   if (phase === "completed" && result) {
     const passed = result.totalScore >= 70;
+    const resumeScore = session?.resumeMatchScore;
+    const quizScore = session?.answerScore;
     return (
       <FullScreen>
-        <div className="w-full max-w-lg space-y-5 px-4">
-          <div className={`rounded-2xl border p-8 text-center space-y-2 ${passed ? "border-green-700 bg-green-950/50" : "border-slate-700 bg-slate-800/50"}`}>
-            <div className="text-5xl">{passed ? "🏆" : "📋"}</div>
+        <div className="w-full max-w-lg space-y-4 px-4 overflow-y-auto max-h-screen py-6">
+          {/* Header */}
+          <div className={`rounded-2xl border p-6 text-center space-y-2 ${passed ? "border-green-700 bg-green-950/50" : "border-slate-700 bg-slate-800/50"}`}>
+            <div className="text-4xl">{passed ? "🏆" : "📋"}</div>
             <p className={`text-xs font-bold uppercase tracking-widest ${passed ? "text-green-400" : "text-slate-400"}`}>
               Interview Complete
             </p>
-            <p className="text-6xl font-bold text-white">{result.totalScore}<span className="text-2xl text-slate-400">/100</span></p>
+            <p className="text-5xl font-bold text-white">
+              {result.totalScore}<span className="text-xl text-slate-400">/100</span>
+            </p>
             {result.overallFeedback && (
-              <p className="text-sm text-slate-300 max-w-sm mx-auto">{result.overallFeedback}</p>
+              <p className="text-sm text-slate-300 max-w-sm mx-auto leading-relaxed">{result.overallFeedback}</p>
             )}
           </div>
+
+          {/* Score summary strip */}
+          <div className="grid grid-cols-3 gap-3">
+            <ScoreCard label="Resume Match" score={resumeScore} outOf={100} />
+            <ScoreCard label="Quiz Score" score={quizScore} outOf={100} />
+            <ScoreCard label="Interview" score={result.totalScore} outOf={100} highlight />
+          </div>
+
+          {/* Per-question breakdown */}
           {result.questionScores && result.questionScores.length > 0 && (
-            <div className="rounded-xl border border-slate-700 bg-slate-800/50 divide-y divide-slate-700 overflow-hidden">
-              {result.questionScores.map((s, i) => (
-                <div key={i} className="flex items-center justify-between px-4 py-3 gap-4">
-                  <p className="text-xs text-slate-400 flex-1">Question {i + 1}: {result.questionFeedback?.[i]}</p>
-                  <span className={`shrink-0 rounded-lg px-2.5 py-0.5 text-xs font-bold ${s >= 7 ? "bg-green-900/60 text-green-300" : s >= 5 ? "bg-yellow-900/60 text-yellow-300" : "bg-red-900/60 text-red-300"}`}>
-                    {s}/10
-                  </span>
-                </div>
-              ))}
+            <div className="rounded-xl border border-slate-700 bg-slate-800/50 overflow-hidden">
+              <p className="px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-400 border-b border-slate-700">
+                Interview question breakdown
+              </p>
+              <div className="divide-y divide-slate-700/60">
+                {result.questionScores.map((s, i) => (
+                  <div key={i} className="flex items-start justify-between gap-4 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-slate-300">Q{i + 1}</p>
+                      {result.questionFeedback?.[i] && (
+                        <p className="mt-0.5 text-xs text-slate-500 leading-relaxed">{result.questionFeedback[i]}</p>
+                      )}
+                    </div>
+                    <span className={`shrink-0 rounded-lg px-2.5 py-0.5 text-xs font-bold tabular-nums ${
+                      s >= 7 ? "bg-green-900/60 text-green-300" : s >= 5 ? "bg-yellow-900/60 text-yellow-300" : "bg-red-900/60 text-red-300"
+                    }`}>
+                      {s}/10
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-500">Results have been sent to your email.</p>
+
+          <p className="text-center text-xs text-slate-500">Full results have been sent to your email.</p>
         </div>
       </FullScreen>
     );
@@ -437,22 +426,26 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
         <div className="w-full max-w-md space-y-6 px-4 text-center">
           <div>
             <p className="text-2xl font-bold text-white">{session?.jobTitle ?? "AI Interview"}</p>
-            <p className="text-sm text-slate-400 mt-1">Hi {session?.candidateName ?? ""} - 3-minute AI mock interview</p>
+            <p className="text-sm text-slate-400 mt-1">
+              Hi {session?.candidateName ?? ""} — 5 questions, take your time
+            </p>
           </div>
 
           {isCamEnabled && (
             <div className="relative mx-auto h-48 w-64 overflow-hidden rounded-2xl bg-slate-800 border border-slate-700">
               <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover scale-x-[-1]" />
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-800/70 text-slate-400 text-sm">
-                {phase === "permission" ? "Requesting camera…" : ""}
-              </div>
+              {phase === "permission" && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-800/70 text-slate-400 text-sm">
+                  Requesting camera…
+                </div>
+              )}
             </div>
           )}
 
           <div className="space-y-2 text-sm text-slate-400">
             <p>✓ Allow camera & microphone when prompted</p>
-            <p>✓ Speak clearly and naturally to answer</p>
-            <p>✓ Keep answers short, around 30-45 seconds each</p>
+            <p>✓ Speak clearly and naturally — no time limit</p>
+            <p>✓ Say &quot;skip&quot; or press Skip to move to the next question</p>
           </div>
 
           {phase === "ready" && (
@@ -466,7 +459,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
     );
   }
 
-  // ── Active interview ──────────────────────────────────────────────────────
+  // ── Active interview ──────────────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 flex flex-col bg-slate-950 text-white">
       {/* Top bar */}
@@ -482,7 +475,9 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           <span className="text-xs text-slate-400">
             Question {Math.min(currentQIdx + 1, totalQuestions)} of {totalQuestions}
           </span>
-          <div className={`h-2 w-2 rounded-full animate-pulse ${phase === "listening" ? "bg-red-500" : phase === "ai_speaking" ? "bg-blue-500" : "bg-slate-600"}`} />
+          <div className={`h-2 w-2 rounded-full animate-pulse ${
+            phase === "listening" ? "bg-red-500" : phase === "ai_speaking" ? "bg-blue-500" : "bg-slate-600"
+          }`} />
         </div>
       </div>
 
@@ -493,13 +488,13 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
 
       {/* Main area */}
       <div className="flex flex-1 flex-col items-center justify-center relative overflow-hidden px-4">
-        {/* AI Avatar */}
         <div className="flex flex-col items-center gap-5">
-          <div className={`relative flex h-28 w-28 items-center justify-center rounded-full border-2 ${isSpeaking ? "border-blue-500 shadow-lg shadow-blue-500/30" : "border-slate-700"} bg-slate-800 transition-all`}>
+          {/* AI avatar */}
+          <div className={`relative flex h-28 w-28 items-center justify-center rounded-full border-2 bg-slate-800 transition-all ${
+            isSpeaking ? "border-blue-500 shadow-lg shadow-blue-500/30" : "border-slate-700"
+          }`}>
             <span className="text-4xl">🤖</span>
-            {isSpeaking && (
-              <div className="absolute -inset-1 rounded-full border-2 border-blue-400/40 animate-ping" />
-            )}
+            {isSpeaking && <div className="absolute -inset-1 rounded-full border-2 border-blue-400/40 animate-ping" />}
           </div>
 
           {/* AI text bubble */}
@@ -535,7 +530,10 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           {/* Live transcript */}
           {(transcript || interimTranscript) && phase === "listening" && (
             <div className="w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm">
-              <p className="text-slate-200">{transcript}<span className="text-slate-500 italic">{interimTranscript}</span></p>
+              <p className="text-slate-200">
+                {transcript}
+                <span className="text-slate-500 italic">{interimTranscript}</span>
+              </p>
               {transcript.trim().split(/\s+/).length >= MIN_WORDS && (
                 <button onClick={handleManualSubmit}
                   className="mt-2 text-xs font-bold text-blue-400 hover:text-blue-300">
@@ -546,7 +544,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           )}
         </div>
 
-        {/* User camera (bottom-right corner) */}
+        {/* User camera (bottom-right) */}
         {isCamEnabled && (
           <div className="absolute bottom-4 right-4 h-36 w-48 overflow-hidden rounded-xl border border-slate-700 bg-slate-800 shadow-xl">
             <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover scale-x-[-1]" />
@@ -556,30 +554,48 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
 
       {/* Bottom controls */}
       <div className="flex items-center justify-center gap-4 border-t border-slate-800 px-5 py-4">
-        <ControlButton
-          onClick={toggleMic}
-          active={isMicEnabled}
-          label={isMicEnabled ? "Mic On" : "Mic Off"}
-          icon={isMicEnabled ? "🎤" : "🔇"}
-        />
-        <ControlButton
-          onClick={toggleCamera}
-          active={isCamEnabled}
-          label={isCamEnabled ? "Cam On" : "Cam Off"}
-          icon={isCamEnabled ? "📷" : "📵"}
-        />
-        {phase === "listening" && transcript.trim() && (
-          <button onClick={handleManualSubmit}
-            className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-500 transition-colors">
-            Send Answer
-          </button>
+        <ControlButton onClick={toggleMic} active={isMicEnabled}
+          label={isMicEnabled ? "Mic On" : "Mic Off"} icon={isMicEnabled ? "🎤" : "🔇"} />
+        <ControlButton onClick={toggleCamera} active={isCamEnabled}
+          label={isCamEnabled ? "Cam On" : "Cam Off"} icon={isCamEnabled ? "📷" : "📵"} />
+        {phase === "listening" && (
+          <>
+            {transcript.trim() && (
+              <button onClick={handleManualSubmit}
+                className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-500 transition-colors">
+                Send Answer
+              </button>
+            )}
+            <button onClick={handleSkip}
+              className="rounded-xl border border-slate-600 px-5 py-2.5 text-sm font-bold text-slate-400 hover:border-slate-500 hover:text-slate-300 transition-colors">
+              Skip
+            </button>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-// ── Small components ──────────────────────────────────────────────────────────
+// ── Shared components ─────────────────────────────────────────────────────────
+
+function ScoreCard({ label, score, outOf, highlight }: {
+  label: string; score: number | undefined; outOf: number; highlight?: boolean;
+}) {
+  const pct = score !== undefined ? Math.round((score / outOf) * 100) : null;
+  const colorClass = pct === null
+    ? "text-slate-500"
+    : pct >= 70 ? "text-green-400" : pct >= 50 ? "text-yellow-400" : "text-red-400";
+  return (
+    <div className={`rounded-xl border px-3 py-3 text-center ${highlight ? "border-blue-700 bg-blue-950/40" : "border-slate-700 bg-slate-800/50"}`}>
+      <p className="text-xs font-semibold text-slate-400 truncate">{label}</p>
+      <p className={`mt-1 text-2xl font-bold tabular-nums ${colorClass}`}>
+        {score !== undefined ? score : "—"}
+        <span className="text-xs text-slate-600">/{outOf}</span>
+      </p>
+    </div>
+  );
+}
 
 function FullScreen({ children }: { children: React.ReactNode }) {
   return (
@@ -588,6 +604,7 @@ function FullScreen({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
 
 function LoadingSpinner({ label }: { label: string }) {
   return (
@@ -606,7 +623,9 @@ function ControlButton({ onClick, active, label, icon }: {
 }) {
   return (
     <button onClick={onClick}
-      className={`flex flex-col items-center gap-1 rounded-xl px-4 py-2.5 text-xs font-bold transition-colors ${active ? "bg-slate-800 text-white hover:bg-slate-700" : "bg-red-900/60 text-red-300 hover:bg-red-900"}`}>
+      className={`flex flex-col items-center gap-1 rounded-xl px-4 py-2.5 text-xs font-bold transition-colors ${
+        active ? "bg-slate-800 text-white hover:bg-slate-700" : "bg-red-900/60 text-red-300 hover:bg-red-900"
+      }`}>
       <span className="text-xl">{icon}</span>
       <span>{label}</span>
     </button>
