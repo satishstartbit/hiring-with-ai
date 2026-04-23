@@ -33,6 +33,7 @@ export interface CandidateSummary {
   screeningAnswers?: string[];
   resumeMatchScore?: number;
   resumeMatchReason?: string;
+  answerScore?: number;
   screeningTimeLimitSeconds?: number;
   appliedAt?: string;
   createdAt: string;
@@ -68,6 +69,7 @@ interface LeanCandidate {
   screeningAnswers?: string[];
   resumeMatchScore?: number;
   resumeMatchReason?: string;
+  answerScore?: number;
   screeningTimeLimitSeconds?: number;
   appliedAt?: Date;
   createdAt?: Date;
@@ -114,6 +116,7 @@ function serializeCandidate(candidate: LeanCandidate): CandidateSummary {
     screeningAnswers: candidate.screeningAnswers,
     resumeMatchScore: candidate.resumeMatchScore,
     resumeMatchReason: candidate.resumeMatchReason,
+    answerScore: candidate.answerScore,
     screeningTimeLimitSeconds: candidate.screeningTimeLimitSeconds,
     appliedAt: optionalDateToString(candidate.appliedAt),
     createdAt: dateToString(candidate.createdAt),

@@ -203,20 +203,22 @@ export default async function JobDetailsPage({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-left text-sm">
+            <table className="w-full min-w-[1000px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-500">
                   <th className="px-6 py-3">Candidate</th>
                   <th className="px-4 py-3">Current role</th>
                   <th className="px-4 py-3">Resume</th>
-                  <th className="px-4 py-3">AI score</th>
+                  <th className="px-4 py-3">Resume Score</th>
+                  <th className="px-4 py-3">Quiz Score</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-6 py-3 text-right">Applied</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {candidates.map((candidate) => {
-                  const score = typeof candidate.resumeMatchScore === "number" ? candidate.resumeMatchScore : null;
+                  const resumeScore = typeof candidate.resumeMatchScore === "number" ? candidate.resumeMatchScore : null;
+                  const quizScore = typeof candidate.answerScore === "number" ? candidate.answerScore : null;
                   const candidateStatusStyle =
                     CANDIDATE_STATUS_STYLES[candidate.status] ?? CANDIDATE_STATUS_STYLES.applied;
                   return (
@@ -232,9 +234,18 @@ export default async function JobDetailsPage({
                       </td>
                       <td className="px-4 py-4">
                         {candidate.resumeFilename ? (
-                          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                            Uploaded
-                          </span>
+                          <a
+                            href={`/api/resumes/${candidate._id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-colors"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                            View Resume
+                          </a>
                         ) : (
                           <span className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-500">
                             No resume
@@ -242,21 +253,44 @@ export default async function JobDetailsPage({
                         )}
                       </td>
                       <td className="px-4 py-4">
-                        {score !== null ? (
+                        {resumeScore !== null ? (
                           <div className="space-y-1.5">
                             <div className="flex items-center justify-between gap-3">
-                              <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-200">
+                              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
                                 <div
                                   className={`h-full rounded-full transition-all ${
-                                    score >= 75 ? "bg-emerald-500" : score >= 50 ? "bg-amber-400" : "bg-red-400"
+                                    resumeScore >= 75 ? "bg-emerald-500" : resumeScore >= 50 ? "bg-amber-400" : "bg-red-400"
                                   }`}
-                                  style={{ width: `${score}%` }}
+                                  style={{ width: `${resumeScore}%` }}
                                 />
                               </div>
                               <span className={`text-xs font-bold tabular-nums ${
-                                score >= 75 ? "text-emerald-700" : score >= 50 ? "text-amber-700" : "text-red-700"
+                                resumeScore >= 75 ? "text-emerald-700" : resumeScore >= 50 ? "text-amber-700" : "text-red-700"
                               }`}>
-                                {score}/100
+                                {resumeScore}/100
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">Not scored</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4">
+                        {quizScore !== null ? (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
+                                <div
+                                  className={`h-full rounded-full transition-all ${
+                                    quizScore >= 75 ? "bg-emerald-500" : quizScore >= 50 ? "bg-amber-400" : "bg-red-400"
+                                  }`}
+                                  style={{ width: `${quizScore}%` }}
+                                />
+                              </div>
+                              <span className={`text-xs font-bold tabular-nums ${
+                                quizScore >= 75 ? "text-emerald-700" : quizScore >= 50 ? "text-amber-700" : "text-red-700"
+                              }`}>
+                                {quizScore}/100
                               </span>
                             </div>
                             <p className="text-xs text-slate-400">
@@ -264,7 +298,7 @@ export default async function JobDetailsPage({
                             </p>
                           </div>
                         ) : (
-                          <span className="text-xs text-slate-400">Not scored</span>
+                          <span className="text-xs text-slate-400">Not taken</span>
                         )}
                       </td>
                       <td className="px-4 py-4">
