@@ -33,7 +33,7 @@ interface ApplyResult {
   questionScores?: number[];
   questionFeedback?: string[];
   overallFeedback?: string;
-  interviewRequired?: boolean;
+  meetingUrl?: string;
 }
 
 type Stage =
@@ -41,15 +41,13 @@ type Stage =
   | "matched"
   | "questions"
   | "rejected"
-  | "schedule"
   | "success";
 
 const STEP_META: Record<Stage, { eyebrow: string; title: string; step: number }> = {
-  details: { eyebrow: "Step 1 of 4", title: "Candidate details", step: 1 },
-  matched: { eyebrow: "Step 2 of 4", title: "Resume fit", step: 2 },
-  questions: { eyebrow: "Step 3 of 4", title: "Screening questions", step: 3 },
-  schedule: { eyebrow: "Step 4 of 4", title: "Interview scheduling", step: 4 },
-  success: { eyebrow: "Complete", title: "Application submitted", step: 4 },
+  details: { eyebrow: "Step 1 of 3", title: "Candidate details", step: 1 },
+  matched: { eyebrow: "Step 2 of 3", title: "Resume fit", step: 2 },
+  questions: { eyebrow: "Step 3 of 3", title: "Screening questions", step: 3 },
+  success: { eyebrow: "Complete", title: "Application submitted", step: 3 },
   rejected: { eyebrow: "Review complete", title: "Resume screening result", step: 2 },
 };
 
@@ -76,9 +74,6 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
 
-  // Interview scheduling
-  const [slots, setSlots] = useState<{ date: string; label: string; times: { iso: string; label: string }[] }[]>([]);
-  const [scheduledConfirmation, setScheduledConfirmation] = useState<{ date: string; meetingUrl?: string; message?: string } | null>(null);
 
   useEffect(() => {
     if (stage !== "questions" || timeLeft <= 0 || isExpired) return;
@@ -173,61 +168,11 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
       const data: ApplyResult & { error?: string } = await res.json();
       if (!res.ok) { setError(data.error || "Something went wrong"); return; }
       setApplyResult(data);
-      if (data.interviewRequired) {
-        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-        const slotsRes = await fetch(`/api/jobs/${jobId}/interview?timeZone=${encodeURIComponent(timeZone)}`);
-        const slotsData: { slots?: typeof slots; error?: string } = await slotsRes.json();
-        if (!slotsRes.ok) { setError(slotsData.error || "Failed to load Cal.com availability"); return; }
-        setSlots(slotsData.slots ?? []);
-        setStage("schedule");
-      } else {
-        setStage("success");
-      }
-    } catch {
-      setError("Network error — please try again");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleSchedule(scheduledDate: string) {
-    if (isSubmitting || !applyResult?.candidateId) return;
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/jobs/${jobId}/interview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          candidateId: applyResult.candidateId,
-          scheduledDate,
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-        }),
-      });
-      const data: {
-        sessionId?: string;
-        immediate?: boolean;
-        meetingUrl?: string;
-        scheduledAt?: string;
-        message?: string;
-        error?: string;
-      } = await res.json();
-      if (!res.ok) { setError(data.error || "Scheduling failed"); return; }
-
-      if (data.immediate && data.meetingUrl) {
+      if (data.meetingUrl) {
         window.location.href = data.meetingUrl;
         return;
-      } else if (data.scheduledAt) {
-        const d = new Date(data.scheduledAt);
-        const label = d.toLocaleString("en-US", {
-          weekday: "long", month: "short", day: "numeric",
-          hour: "2-digit", minute: "2-digit",
-        });
-        setScheduledConfirmation({ date: label, meetingUrl: data.meetingUrl, message: data.message });
-        setStage("success");
-      } else {
-        setStage("success");
       }
+      setStage("success");
     } catch {
       setError("Network error — please try again");
     } finally {
@@ -274,7 +219,7 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
         </div>
 
         <div className="max-h-[calc(94vh-128px)] overflow-y-auto bg-slate-50 p-4 sm:p-6">
-          {stage === "success" && <SuccessState result={applyResult} scheduledConfirmation={scheduledConfirmation} onClose={onClose} />}
+          {stage === "success" && <SuccessState result={applyResult} onClose={onClose} />}
           {stage === "rejected" && <RejectedState matchResult={matchResult} onClose={onClose} />}
 
           {stage === "details" && (
@@ -333,8 +278,8 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
                 </p>
                 <div className="mt-4 space-y-3">
                   <ProcessItem number="1" title="Upload resume" text="Your resume is checked against the role requirements." />
-                  <ProcessItem number="2" title="Answer screening" text="Matched candidates complete a timed role-specific screen." />
-                  <ProcessItem number="3" title="Schedule interview" text="Strong scores unlock a quick AI video interview." />
+                  <ProcessItem number="2" title="Screening quiz" text="Matched candidates complete a timed role-specific test." />
+                  <ProcessItem number="3" title="AI video interview" text="Complete a short AI interview — pass to book a call with our team." />
                 </div>
                 <div className="mt-5 rounded-md border border-blue-100 bg-blue-50 p-3 text-xs leading-5 text-blue-800">
                   Your details are used only for this hiring workflow and candidate evaluation.
@@ -380,115 +325,8 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
             />
           )}
 
-          {stage === "schedule" && (
-            <ScheduleStage
-              score={applyResult?.totalScore}
-              slots={slots}
-              isSubmitting={isSubmitting}
-              error={error}
-              onSchedule={handleSchedule}
-            />
-          )}
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─── Schedule Stage ───────────────────────────────────────────────────────────
-
-function ScheduleStage({
-  score,
-  slots,
-  isSubmitting,
-  error,
-  onSchedule,
-}: {
-  score?: number;
-  slots: { date: string; label: string; times: { iso: string; label: string }[] }[];
-  isSubmitting: boolean;
-  error: string | null;
-  onSchedule: (date: string) => void;
-}) {
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-
-  return (
-    <div className="space-y-5">
-      <div className="rounded-xl border border-green-200 bg-gradient-to-b from-green-50 to-white p-5 text-center space-y-1">
-        <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700 font-bold text-xl">🎉</div>
-        <p className="text-xs font-bold uppercase tracking-widest text-green-600">You Passed the Screening!</p>
-        {score !== undefined && (
-          <p className="text-3xl font-bold text-slate-900">{score}<span className="text-base text-slate-400">/100</span></p>
-        )}
-        <p className="text-sm text-slate-600">Schedule your 3-minute AI video interview with Cal.com to continue.</p>
-      </div>
-
-      <div className="space-y-4">
-        <p className="text-sm font-bold text-slate-700">When would you like to interview?</p>
-
-        {/* Immediate option */}
-        <button
-          onClick={() => onSchedule("immediate")}
-          disabled={isSubmitting}
-          className="w-full rounded-xl border-2 border-blue-500 bg-blue-50 px-4 py-4 text-left transition-colors hover:bg-blue-100 disabled:opacity-50"
-        >
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white text-lg">▶</span>
-            <div>
-              <p className="text-sm font-bold text-blue-800">Start Now</p>
-              <p className="text-xs text-blue-600">Opens your AI video interview immediately (~3 min)</p>
-            </div>
-          </div>
-        </button>
-
-        {/* Date + time slot picker */}
-        <div className="space-y-3">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Or pick a Cal.com time slot</p>
-
-          {/* Date tabs */}
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-            {slots.map((slot) => (
-              <button
-                key={slot.date}
-                onClick={() => setSelectedDate(slot.date === selectedDate ? null : slot.date)}
-                className={`shrink-0 rounded-lg border px-3 py-2 text-xs font-bold transition-colors ${
-                  selectedDate === slot.date
-                    ? "border-blue-500 bg-blue-600 text-white"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
-                }`}
-              >
-                {slot.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Time slots for selected date */}
-          {selectedDate && (() => {
-            const daySlots = slots.find((s) => s.date === selectedDate);
-            return daySlots ? (
-              <div className="grid grid-cols-4 gap-2">
-                {daySlots.times.map(({ iso, label }) => (
-                  <button
-                    key={iso}
-                    onClick={() => onSchedule(iso)}
-                    disabled={isSubmitting}
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            ) : null;
-          })()}
-        </div>
-      </div>
-
-      {error && <ErrorMsg message={error} />}
-      {isSubmitting && (
-        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
-          <Spinner /> Setting up your interview…
-        </div>
-      )}
     </div>
   );
 }
@@ -609,41 +447,19 @@ function QuestionsStage({
 
 function SuccessState({
   result,
-  scheduledConfirmation,
   onClose,
 }: {
   result: ApplyResult | null;
-  scheduledConfirmation: { date: string; meetingUrl?: string; message?: string } | null;
   onClose: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="space-y-5">
-      {scheduledConfirmation ? (
-        <div className="rounded-xl border border-blue-200 bg-gradient-to-b from-blue-50 to-white p-6 text-center space-y-2">
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-700 font-bold text-xl">📅</div>
-          <p className="text-base font-bold text-slate-900">Interview Scheduled!</p>
-          <p className="text-sm text-slate-600">Your AI video interview is confirmed for:</p>
-          <p className="text-sm font-bold text-blue-800">{scheduledConfirmation.date}</p>
-          <p className="text-xs text-slate-500">
-            {scheduledConfirmation.message || "A confirmation email with your meeting link has been sent to your inbox."}
-          </p>
-          {scheduledConfirmation.meetingUrl && (
-          <a
-            href={scheduledConfirmation.meetingUrl}
-            className="mt-2 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700"
-          >
-            Join AI Interview →
-          </a>
-          )}
-        </div>
-      ) : (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center space-y-1">
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700 font-bold text-xl">✓</div>
-          <p className="text-base font-bold text-slate-900">Application submitted</p>
-          <p className="text-sm text-slate-500">Your resume and answers have been saved. Check your email for details.</p>
-        </div>
-      )}
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center space-y-1">
+        <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700 font-bold text-xl">✓</div>
+        <p className="text-base font-bold text-slate-900">Application submitted</p>
+        <p className="text-sm text-slate-500">Your resume and answers have been saved. Check your email for details.</p>
+      </div>
 
       {result?.totalScore !== undefined && (
         <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
@@ -743,10 +559,10 @@ function Spinner() {
 }
 
 function StepRail({ step, status }: { step: number; status: Stage }) {
-  const labels = ["Profile", "Resume", "Screen", "Interview"];
+  const labels = ["Profile", "Resume", "Screen"];
 
   return (
-    <div className="grid grid-cols-4 border-t border-slate-100">
+    <div className="grid grid-cols-3 border-t border-slate-100">
       {labels.map((label, index) => {
         const itemStep = index + 1;
         const isCurrent = itemStep === step && status !== "success";

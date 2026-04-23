@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 
 interface BrowserSpeechRecognitionAlternative {
   transcript: string;
@@ -47,6 +48,8 @@ type Phase =
   | "error";
 
 interface SessionData {
+  jobId?: string;
+  candidateId?: string;
   jobTitle: string;
   candidateName: string;
   status: string;
@@ -60,6 +63,12 @@ interface SessionData {
   questionFeedback?: string[];
   resumeMatchScore?: number;
   answerScore?: number;
+}
+
+interface SlotDay {
+  date: string;
+  label: string;
+  times: { iso: string; label: string }[];
 }
 
 interface InterviewResult {
@@ -85,6 +94,14 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   const [isCamEnabled, setIsCamEnabled] = useState(true);
   const [isMicEnabled, setIsMicEnabled] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
+
+  // Post-interview scheduling state
+  const [scheduleStep, setScheduleStep] = useState<"scores" | "picking" | "done">("scores");
+  const [slots, setSlots] = useState<SlotDay[]>([]);
+  const [selectedSlotDate, setSelectedSlotDate] = useState<string | null>(null);
+  const [scheduledInfo, setScheduledInfo] = useState<{ date: string; message?: string } | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [isScheduling, setIsScheduling] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -360,8 +377,54 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
     );
   }
 
+  async function loadScheduleSlots() {
+    if (!session?.jobId) return;
+    setIsScheduling(true);
+    setScheduleError(null);
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      const res = await fetch(`/api/jobs/${session.jobId}/interview?timeZone=${encodeURIComponent(tz)}`);
+      const data: { slots?: SlotDay[]; error?: string } = await res.json();
+      if (!res.ok) { setScheduleError(data.error || "Failed to load time slots"); return; }
+      setSlots(data.slots ?? []);
+      setScheduleStep("picking");
+    } catch {
+      setScheduleError("Network error loading time slots");
+    } finally {
+      setIsScheduling(false);
+    }
+  }
+
+  async function handleScheduleSlot(isoDate: string) {
+    if (!session?.jobId || !session?.candidateId || isScheduling) return;
+    setIsScheduling(true);
+    setScheduleError(null);
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      const res = await fetch(`/api/jobs/${session.jobId}/interview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidateId: session.candidateId, scheduledDate: isoDate, timeZone: tz }),
+      });
+      const data: { scheduledAt?: string; message?: string; error?: string } = await res.json();
+      if (!res.ok) { setScheduleError(data.error || "Scheduling failed"); return; }
+      if (data.scheduledAt) {
+        const d = new Date(data.scheduledAt);
+        const label = d.toLocaleString("en-US", {
+          weekday: "long", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+        });
+        setScheduledInfo({ date: label, message: data.message });
+      }
+      setScheduleStep("done");
+    } catch {
+      setScheduleError("Network error. Please try again.");
+    } finally {
+      setIsScheduling(false);
+    }
+  }
+
   if (phase === "completed" && result) {
-    const passed = result.totalScore >= 70;
+    const passed = result.totalScore >= 30;
     const resumeScore = session?.resumeMatchScore;
     const quizScore = session?.answerScore;
     return (
@@ -411,6 +474,92 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Schedule or not-passed section */}
+          {passed ? (
+            <div className="space-y-4">
+              {scheduleStep === "scores" && (
+                <div className="rounded-xl border border-green-700 bg-green-950/30 p-5 text-center space-y-3">
+                  <p className="text-sm font-bold text-green-300">You passed the AI interview!</p>
+                  <p className="text-xs text-slate-400">Schedule your final interview with our team to continue.</p>
+                  <button
+                    onClick={() => { void loadScheduleSlots(); }}
+                    disabled={isScheduling}
+                    className="w-full rounded-xl bg-green-600 px-5 py-3 text-sm font-bold text-white hover:bg-green-500 disabled:opacity-50 transition-colors"
+                  >
+                    {isScheduling
+                      ? <span className="flex items-center justify-center gap-2"><InterviewSpinner /> Loading slots…</span>
+                      : "Schedule Interview with Team →"}
+                  </button>
+                  {scheduleError && <p className="text-xs text-red-400">{scheduleError}</p>}
+                </div>
+              )}
+
+              {scheduleStep === "picking" && (
+                <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4 space-y-4">
+                  <p className="text-sm font-bold text-white">When would you like to meet?</p>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {slots.map((slot) => (
+                      <button
+                        key={slot.date}
+                        onClick={() => setSelectedSlotDate(slot.date === selectedSlotDate ? null : slot.date)}
+                        className={`shrink-0 rounded-lg border px-3 py-2 text-xs font-bold transition-colors ${
+                          selectedSlotDate === slot.date
+                            ? "border-blue-500 bg-blue-600 text-white"
+                            : "border-slate-600 bg-slate-700 text-slate-300 hover:border-blue-400 hover:bg-slate-600"
+                        }`}
+                      >
+                        {slot.label}
+                      </button>
+                    ))}
+                  </div>
+                  {selectedSlotDate && (() => {
+                    const daySlots = slots.find((s) => s.date === selectedSlotDate);
+                    return daySlots ? (
+                      <div className="grid grid-cols-3 gap-2">
+                        {daySlots.times.map(({ iso, label }) => (
+                          <button
+                            key={iso}
+                            onClick={() => { void handleScheduleSlot(iso); }}
+                            disabled={isScheduling}
+                            className="rounded-lg border border-slate-600 bg-slate-700 px-2 py-2.5 text-xs font-bold text-slate-300 transition-colors hover:border-blue-400 hover:bg-blue-900/40 hover:text-blue-300 disabled:opacity-50"
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
+                  {scheduleError && <p className="text-xs text-red-400">{scheduleError}</p>}
+                  {isScheduling && (
+                    <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+                      <InterviewSpinner /> Booking your slot…
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {scheduleStep === "done" && (
+                <div className="rounded-xl border border-blue-700 bg-blue-950/30 p-5 text-center space-y-2">
+                  <div className="text-2xl">📅</div>
+                  <p className="text-sm font-bold text-blue-300">Interview Scheduled!</p>
+                  {scheduledInfo && <p className="text-xs text-slate-300">{scheduledInfo.date}</p>}
+                  <p className="text-xs text-slate-500">
+                    {scheduledInfo?.message || "A confirmation will be sent to your email."}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-5 text-center space-y-2">
+              <p className="text-sm text-slate-400">Thank you for completing the interview.</p>
+              <p className="text-xs text-slate-500">We appreciate your time. Results have been emailed to you.</p>
+              <Link href="/jobs"
+                className="mt-2 inline-block rounded-lg bg-slate-700 px-5 py-2 text-sm font-bold text-white hover:bg-slate-600 transition-colors">
+                Browse Other Positions
+              </Link>
             </div>
           )}
 
@@ -526,6 +675,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
               <span className="text-slate-400 animate-pulse">Processing your answer…</span>
             )}
           </div>
+          
 
           {/* Live transcript */}
           {(transcript || interimTranscript) && phase === "listening" && (
@@ -615,6 +765,15 @@ function LoadingSpinner({ label }: { label: string }) {
       </svg>
       <p className="text-sm text-slate-400">{label}</p>
     </div>
+  );
+}
+
+function InterviewSpinner() {
+  return (
+    <svg className="animate-spin h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
   );
 }
 

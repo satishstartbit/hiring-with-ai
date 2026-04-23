@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { connectDB } from "../../../../lib/db/connection";
 import Job from "../../../../lib/db/models/Job";
 import Candidate from "../../../../lib/db/models/Candidate";
+import InterviewSession from "../../../../lib/db/models/InterviewSession";
 import { runGradingWorkflow } from "../../../../lib/workflow/gradingGraph";
 import type { ScreeningQuestion } from "../../../../lib/workflow/screeningState";
 import { sendScreeningResultEmail } from "../../../../lib/email";
@@ -196,7 +197,35 @@ export async function POST(
       // Grading failure must not block submission
     }
 
-    const passed = totalScore >= 70;
+    // Create AI interview session so the candidate can proceed to Round 2
+    let meetingUrl: string | undefined;
+    try {
+      const origin = request.headers.get("origin");
+      const host = request.headers.get("host") ?? "localhost:3000";
+      const proto = host.startsWith("localhost") ? "http" : "https";
+      const baseUrl = origin ?? `${proto}://${host}`;
+
+      const interviewSession = await InterviewSession.create({
+        candidateId: candidate._id,
+        jobId: new mongoose.Types.ObjectId(id),
+        jobTitle: job.title,
+        jobDescription: job.description ?? "",
+        jobRequirements: job.requirements ?? [],
+        candidateName: name,
+        candidateEmail: email,
+        status: "scheduled",
+        scheduledAt: new Date(),
+        questions: [],
+        conversationHistory: [],
+        answers: [],
+        currentQuestionIndex: 0,
+      });
+
+      meetingUrl = `${baseUrl}/interview/${interviewSession._id}`;
+      await InterviewSession.findByIdAndUpdate(interviewSession._id, { meetingUrl });
+    } catch (sessionErr) {
+      console.error("[apply] Failed to create interview session:", sessionErr);
+    }
 
     return Response.json(
       {
@@ -207,8 +236,7 @@ export async function POST(
         questionFeedback,
         totalScore: totalScore || undefined,
         overallFeedback: overallFeedback || undefined,
-        // Signal the UI to show interview scheduling when candidate passed
-        interviewRequired: passed,
+        meetingUrl,
       },
       { status: 201 }
     );

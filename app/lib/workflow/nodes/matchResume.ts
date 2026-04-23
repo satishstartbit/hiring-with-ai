@@ -17,11 +17,8 @@ export const matchResumeNode = traceable(
   async (state: ScreeningState): Promise<Partial<ScreeningState>> => {
   try {
     const llm = createLLM();
-    const structured = llm.withStructuredOutput(MatchSchema, {
-      name: "match_resume_to_job",
-    });
 
-    const result = await structured.invoke([
+    const response = await llm.invoke([
       new SystemMessage(
         [
           "You are a fair and balanced hiring evaluator scoring resume-to-job fit.",
@@ -29,6 +26,8 @@ export const matchResumeNode = traceable(
           "Only score below 60 if the candidate is clearly from an unrelated field or severely underqualified for every listed requirement.",
           "Partial matches, adjacent experience, or transferable skills should push the score toward 60-80.",
           "If resume text looks like garbled binary, rely on the candidate title and filename — do not fabricate or penalise unfairly.",
+          "",
+          'Output ONLY valid JSON with no markdown fences: {"score":<number 0-100>,"reason":"<2-3 sentences>"}',
         ].join(" ")
       ),
       new HumanMessage(
@@ -45,6 +44,10 @@ export const matchResumeNode = traceable(
         ].join("\n")
       ),
     ]);
+
+    const rawText = typeof response.content === "string" ? response.content : "";
+    const jsonStr = rawText.replace(/^```(?:json)?\s*/m, "").replace(/\s*```$/m, "").trim();
+    const result = MatchSchema.parse(JSON.parse(jsonStr));
 
     // Score ≥ 60 is the acceptance rule regardless of any LLM boolean flag
     const isMatch = result.score >= ACCEPT_THRESHOLD;

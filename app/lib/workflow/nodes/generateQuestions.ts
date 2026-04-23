@@ -9,24 +9,14 @@ const MCQ_COUNT = 8;
 const DESC_COUNT = 2;
 
 const QuestionsSchema = z.object({
-  mcqQuestions: z
-    .array(
-      z.object({
-        question: z.string().describe("The question text"),
-        options: z
-          .array(z.string())
-          .describe("Array of exactly 4 answer options: [optionA, optionB, optionC, optionD]"),
-        correctIndex: z
-          .number()
-          .min(0)
-          .max(3)
-          .describe("0-based index of the correct option (0=A, 1=B, 2=C, 3=D)"),
-      })
-    )
-    .describe(`Array of exactly ${MCQ_COUNT} multiple-choice questions`),
-  descriptiveQuestions: z
-    .array(z.string())
-    .describe(`Array of exactly ${DESC_COUNT} open-ended descriptive questions`),
+  mcqQuestions: z.array(
+    z.object({
+      question: z.string(),
+      options: z.array(z.string()),
+      correctIndex: z.number().min(0).max(3),
+    })
+  ),
+  descriptiveQuestions: z.array(z.string()),
 });
 
 export const generateQuestionsNode = traceable(
@@ -38,22 +28,19 @@ export const generateQuestionsNode = traceable(
     );
 
     const llm = createLLM();
-    const structured = llm.withStructuredOutput(QuestionsSchema, {
-      name: "generate_screening_questions",
-    });
 
     const searchSection = searchContext
       ? `\n\nWeb context (use as inspiration for realistic questions):\n${searchContext}`
       : "";
 
-    const result = await structured.invoke([
+    const response = await llm.invoke([
       new SystemMessage(
         [
           `Generate exactly ${MCQ_COUNT} multiple-choice questions and ${DESC_COUNT} open-ended descriptive questions for this job role.`,
           "",
           `MCQ rules (${MCQ_COUNT} questions):`,
           "• Each MCQ has exactly 4 options.",
-          "• Exactly one option is correct — set correctIndex to its 0-based position.",
+          "• Exactly one option is correct — set correctIndex to its 0-based position (0=A, 1=B, 2=C, 3=D).",
           "• Test factual knowledge, best practices, or role-specific technical concepts.",
           "• All 4 options must be plausible but only one is unambiguously correct.",
           "",
@@ -61,6 +48,9 @@ export const generateQuestionsNode = traceable(
           "• Open-ended, requiring a written paragraph answer.",
           "• Test real-world experience, problem-solving, or behavioral scenarios for this role.",
           "• Each is a single sentence ending with '?'.",
+          "",
+          "Output ONLY valid JSON with no markdown fences, no extra text. Use this exact structure:",
+          `{"mcqQuestions":[{"question":"...","options":["A","B","C","D"],"correctIndex":0}],"descriptiveQuestions":["...?"]}`,
         ].join("\n")
       ),
       new HumanMessage(
@@ -73,6 +63,11 @@ export const generateQuestionsNode = traceable(
         ].join("\n")
       ),
     ]);
+
+    const rawText = typeof response.content === "string" ? response.content : "";
+    // Strip markdown code fences if the model wraps the output
+    const jsonStr = rawText.replace(/^```(?:json)?\s*/m, "").replace(/\s*```$/m, "").trim();
+    const result = QuestionsSchema.parse(JSON.parse(jsonStr));
 
     if (result.descriptiveQuestions.length < DESC_COUNT) {
       return { error: `AI generated only ${result.descriptiveQuestions.length}/${DESC_COUNT} descriptive questions. Please try again.` };

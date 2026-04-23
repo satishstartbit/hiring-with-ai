@@ -25,9 +25,6 @@ export const gradeAnswersNode = traceable(
   async (state: GradingState): Promise<Partial<GradingState>> => {
   try {
     const llm = createLLM();
-    const structured = llm.withStructuredOutput(GradingSchema, {
-      name: "grade_screening_answers",
-    });
 
     const qAndA = state.questions
       .map(
@@ -36,7 +33,7 @@ export const gradeAnswersNode = traceable(
       )
       .join("\n\n");
 
-    const result = await structured.invoke([
+    const response = await llm.invoke([
       new SystemMessage(
         [
           "You are a technical hiring evaluator grading candidate screening answers.",
@@ -52,6 +49,8 @@ export const gradeAnswersNode = traceable(
           "• Return arrays whose length exactly matches the number of questions.",
           "• totalScore = round(sum(questionScores) / (count × 10) × 100)",
           "• Be objective and consistent across all answers.",
+          "",
+          'Output ONLY valid JSON with no markdown fences: {"questionScores":[<0-10>,...],"questionFeedback":["<sentence>",...],"totalScore":<0-100>,"overallFeedback":"<2-3 sentences>"}',
         ].join("\n")
       ),
       new HumanMessage(
@@ -64,6 +63,10 @@ export const gradeAnswersNode = traceable(
         ].join("\n")
       ),
     ]);
+
+    const rawText = typeof response.content === "string" ? response.content : "";
+    const jsonStr = rawText.replace(/^```(?:json)?\s*/m, "").replace(/\s*```$/m, "").trim();
+    const result = GradingSchema.parse(JSON.parse(jsonStr));
 
     const count = state.questions.length;
 

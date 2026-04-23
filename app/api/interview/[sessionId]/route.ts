@@ -26,6 +26,8 @@ export async function GET(
 
   return Response.json({
     sessionId: session._id.toString(),
+    jobId: session.jobId.toString(),
+    candidateId: session.candidateId.toString(),
     status: session.status,
     jobTitle: session.jobTitle,
     candidateName: session.candidateName,
