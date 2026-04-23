@@ -141,17 +141,53 @@ export async function getJobById(id: string): Promise<JobSummary | null> {
   return job ? serializeJob(job) : null;
 }
 
-export async function getCandidates(jobId?: string): Promise<CandidateSummary[]> {
+export async function getCandidates(
+  jobId?: string,
+  options: {
+    page?: number;
+    limit?: number;
+    search?: string;
+  } = {}
+): Promise<{
+  candidates: CandidateSummary[];
+  total: number;
+  page: number;
+  totalPages: number;
+}> {
   await connectDB();
-  const query =
-    jobId && mongoose.isValidObjectId(jobId)
-      ? { jobId: new mongoose.Types.ObjectId(jobId) }
-      : {};
+  const { page = 1, limit = 10, search } = options;
+
+  const query: Record<string, unknown> = {};
+  if (jobId && mongoose.isValidObjectId(jobId)) {
+    query.jobId = new mongoose.Types.ObjectId(jobId);
+  }
+
+  // Add search functionality
+  if (search && search.trim()) {
+    const searchRegex = new RegExp(search.trim(), 'i');
+    query.$or = [
+      { name: searchRegex },
+      { email: searchRegex },
+      { currentTitle: searchRegex },
+      { currentCompany: searchRegex },
+    ];
+  }
+
+  const total = await Candidate.countDocuments(query);
+  const totalPages = Math.ceil(total / limit);
+  const skip = (page - 1) * limit;
+
   const candidates = (await Candidate.find(query)
     .select("-resumeData")
     .sort({ createdAt: -1 })
-    .limit(200)
+    .skip(skip)
+    .limit(limit)
     .lean()) as unknown as LeanCandidate[];
 
-  return candidates.map(serializeCandidate);
+  return {
+    candidates: candidates.map(serializeCandidate),
+    total,
+    page,
+    totalPages,
+  };
 }
