@@ -56,7 +56,6 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Candidate details
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [currentTitle, setCurrentTitle] = useState("");
@@ -64,7 +63,6 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Screening
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
   const [questions, setQuestions] = useState<ScreeningQuestion[]>([]);
   const [timeLimitSeconds, setTimeLimitSeconds] = useState(20 * 60);
@@ -73,7 +71,6 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   const [isExpired, setIsExpired] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
-
 
   useEffect(() => {
     if (stage !== "questions" || timeLeft <= 0 || isExpired) return;
@@ -85,6 +82,12 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [stage, timeLeft, isExpired]);
+
+  // Prevent body scroll while modal is open
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = ""; };
+  }, []);
 
   function buildCandidateFormData() {
     const fd = new FormData();
@@ -181,36 +184,43 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   }
 
   return (
+    // Overlay: bottom-sheet on mobile, centered on sm+
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="max-h-[94vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl">
-        <div className="sticky top-0 z-10 border-b border-slate-200 bg-white">
-          <div className="flex items-start justify-between gap-4 px-5 py-5 sm:px-6">
+      {/* Dialog: full-width bottom sheet on mobile, max-w card on sm+ */}
+      <div className="flex w-full flex-col sm:mx-4 sm:max-w-2xl lg:max-w-4xl rounded-t-2xl sm:rounded-xl border border-slate-200 bg-white shadow-2xl"
+        style={{ maxHeight: "92dvh" }}
+      >
+        {/* ── Sticky header ── */}
+        <div className="shrink-0 border-b border-slate-200 bg-white rounded-t-2xl sm:rounded-t-xl">
+          {/* Drag handle on mobile */}
+          <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-slate-200 sm:hidden" />
+          <div className="flex items-start justify-between gap-3 px-4 py-4 sm:px-6 sm:py-5">
             <div className="min-w-0">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="rounded-md bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
+              <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-700">
                   {currentStep.eyebrow}
                 </span>
-                <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
+                <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
                   Apply for position
                 </span>
               </div>
-              <h2 className="text-xl font-bold tracking-tight text-slate-950">
+              <h2 className="text-lg font-bold tracking-tight text-slate-950 sm:text-xl">
                 {currentStep.title}
               </h2>
-              <p className="mt-1 truncate text-sm font-medium text-slate-500">
+              <p className="mt-0.5 truncate text-sm font-medium text-slate-500">
                 {jobTitle}
               </p>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
               aria-label="Close"
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M4.47 4.47a.75.75 0 0 1 1.06 0L8 6.94l2.47-2.47a.75.75 0 1 1 1.06 1.06L9.06 8l2.47 2.47a.75.75 0 1 1-1.06 1.06L8 9.06l-2.47 2.47a.75.75 0 0 1-1.06-1.06L6.94 8 4.47 5.53a.75.75 0 0 1 0-1.06Z" />
               </svg>
             </button>
@@ -218,61 +228,66 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
           <StepRail step={currentStep.step} status={stage} />
         </div>
 
-        <div className="max-h-[calc(94vh-128px)] overflow-y-auto bg-slate-50 p-4 sm:p-6">
+        {/* ── Scrollable body ── */}
+        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4 sm:p-6">
           {stage === "success" && <SuccessState result={applyResult} onClose={onClose} />}
           {stage === "rejected" && <RejectedState matchResult={matchResult} onClose={onClose} />}
 
           {stage === "details" && (
-            <form onSubmit={handleCheckResume} className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
-              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-5 rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
-                <p className="font-bold text-blue-900">Start with your resume</p>
-                <p className="mt-1 leading-6">
-                  Our AI checks your fit before unlocking timed screening questions.
-                </p>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Full name *">
-                  <input type="text" required value={name} onChange={(e) => setName(e.target.value)}
-                    placeholder="Alex Johnson" className="field-input" />
-                </Field>
-                <Field label="Email *">
-                  <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-                    placeholder="alex@example.com" className="field-input" />
-                </Field>
-                <Field label="Current title">
-                  <input type="text" value={currentTitle} onChange={(e) => setCurrentTitle(e.target.value)}
-                    placeholder="Software Engineer" className="field-input" />
-                </Field>
-                <Field label="Current company">
-                  <input type="text" value={currentCompany} onChange={(e) => setCurrentCompany(e.target.value)}
-                    placeholder="TechCorp" className="field-input" />
-                </Field>
-              </div>
-              <Field label="Resume (PDF, DOC, TXT — max 5 MB) *">
-                <button type="button" onClick={() => fileInputRef.current?.click()}
-                  className="group w-full rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-5 py-6 text-center text-sm font-bold text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700">
-                  {resumeFile ? (
+            <form onSubmit={handleCheckResume} className="space-y-4 lg:space-y-0 lg:grid lg:grid-cols-[minmax(0,1fr)_260px] lg:gap-4">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+                <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
+                  <p className="font-bold text-blue-900">Start with your resume</p>
+                  <p className="mt-0.5 leading-5 text-xs sm:text-sm">
+                    Our AI checks your fit before unlocking timed screening questions.
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Full name *">
+                    <input type="text" required value={name} onChange={(e) => setName(e.target.value)}
+                      placeholder="Alex Johnson" className="field-input" />
+                  </Field>
+                  <Field label="Email *">
+                    <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+                      placeholder="alex@example.com" className="field-input" />
+                  </Field>
+                  <Field label="Current title">
+                    <input type="text" value={currentTitle} onChange={(e) => setCurrentTitle(e.target.value)}
+                      placeholder="Software Engineer" className="field-input" />
+                  </Field>
+                  <Field label="Current company">
+                    <input type="text" value={currentCompany} onChange={(e) => setCurrentCompany(e.target.value)}
+                      placeholder="TechCorp" className="field-input" />
+                  </Field>
+                </div>
+                <div className="mt-3">
+                  <Field label="Resume (PDF, DOC, TXT — max 5 MB) *">
+                    <button type="button" onClick={() => fileInputRef.current?.click()}
+                      className="w-full rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center text-sm font-bold text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700">
+                      {resumeFile ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <span className="text-green-600">✓</span>
+                          <span className="max-w-[200px] truncate">{resumeFile.name}</span>
+                        </span>
+                      ) : "Tap to upload resume"}
+                    </button>
+                    <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.txt" className="hidden"
+                      onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)} />
+                  </Field>
+                </div>
+                {error && <div className="mt-3"><ErrorMsg message={error} /></div>}
+                <button type="submit" disabled={isSubmitting}
+                  className="mt-4 w-full rounded-md bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                  {isSubmitting ? (
                     <span className="flex items-center justify-center gap-2">
-                      <span className="text-green-600">✓</span> {resumeFile.name}
+                      <Spinner /> AI is reviewing your resume…
                     </span>
-                  ) : "Click to upload resume"}
+                  ) : "Check Resume Fit"}
                 </button>
-                <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.txt" className="hidden"
-                  onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)} />
-              </Field>
-              {error && <ErrorMsg message={error} />}
-              <button type="submit" disabled={isSubmitting}
-                className="w-full rounded-md bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
-                {isSubmitting ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <Spinner /> AI is reviewing your resume…
-                  </span>
-                ) : "Check Resume Fit"}
-              </button>
               </div>
 
-              <aside className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              {/* Application flow sidebar — hidden on mobile to save space */}
+              <aside className="hidden lg:block rounded-lg border border-slate-200 bg-white p-5 shadow-sm self-start">
                 <p className="text-xs font-bold uppercase tracking-wide text-blue-700">
                   Application flow
                 </p>
@@ -289,14 +304,14 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
           )}
 
           {stage === "matched" && (
-            <div className="space-y-5">
-              <div className="rounded-lg border border-emerald-200 bg-white p-6 text-center shadow-sm">
-                <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700 font-bold text-lg">✓</div>
+            <div className="space-y-4">
+              <div className="rounded-lg border border-emerald-200 bg-white p-5 text-center shadow-sm">
+                <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-green-100 text-green-700 font-bold text-lg">✓</div>
                 <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Resume matched</p>
-                <p className="mt-2 text-5xl font-bold text-slate-950">{matchResult?.score}<span className="text-xl text-slate-400">/100</span></p>
-                {matchResult?.reason && <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-slate-600">{matchResult.reason}</p>}
+                <p className="mt-2 text-4xl sm:text-5xl font-bold text-slate-950">{matchResult?.score}<span className="text-lg text-slate-400">/100</span></p>
+                {matchResult?.reason && <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-600">{matchResult.reason}</p>}
               </div>
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
                 Next: a timed screening test — 8 multiple-choice + 2 open-ended questions (20 min limit).
               </div>
               {error && <ErrorMsg message={error} />}
@@ -324,7 +339,6 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
               formatTime={formatTime}
             />
           )}
-
         </div>
       </div>
     </div>
@@ -365,14 +379,16 @@ function QuestionsStage({
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
-        <p className="text-sm font-bold text-blue-900">Resume match: {matchResult?.score ?? 0}/100</p>
-        <div className={`rounded-lg px-3 py-1.5 text-sm font-bold tabular-nums ${isExpired ? "bg-red-600 text-white" : "bg-white text-blue-700 border border-blue-200"}`}>
+    <form onSubmit={onSubmit} className="space-y-3">
+      {/* Timer + match bar */}
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5">
+        <p className="text-xs font-bold text-blue-900 sm:text-sm">Match: {matchResult?.score ?? 0}/100</p>
+        <div className={`rounded-lg px-3 py-1 text-sm font-bold tabular-nums ${isExpired ? "bg-red-600 text-white" : "bg-white text-blue-700 border border-blue-200"}`}>
           {formatTime(timeLeft)}
         </div>
       </div>
 
+      {/* Progress */}
       <div className="space-y-1">
         <div className="flex items-center justify-between text-xs font-medium text-slate-500">
           <span>Question {currentIndex + 1} of {total}</span>
@@ -383,12 +399,13 @@ function QuestionsStage({
         </div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
+      {/* Question card */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
         <p className="text-sm font-bold text-slate-900 leading-snug">
           {currentIndex + 1}. {questions[currentIndex]?.text}
         </p>
         {questions[currentIndex]?.type === "mcq" ? (
-          <div className="mt-4 space-y-2">
+          <div className="mt-3 space-y-2">
             {(questions[currentIndex] as MCQQuestion).options.map((option, optIdx) => (
               <label key={optIdx} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
                 answers[currentIndex] === String(optIdx) ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
@@ -407,12 +424,12 @@ function QuestionsStage({
             ))}
           </div>
         ) : (
-          <textarea key={currentIndex} rows={6} value={answers[currentIndex] ?? ""} disabled={isExpired} autoFocus
+          <textarea key={currentIndex} rows={4} value={answers[currentIndex] ?? ""} disabled={isExpired} autoFocus
             onChange={(e) => {
               const next = [...answers]; next[currentIndex] = e.target.value; setAnswers(next);
               if (error) setError(null);
             }}
-            className="mt-4 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
+            className="mt-3 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 sm:rows-6"
             placeholder="Write your answer here…"
           />
         )}
@@ -421,16 +438,17 @@ function QuestionsStage({
       {isExpired && <ErrorMsg message="Time expired. Please close and restart the application." />}
       {error && <ErrorMsg message={error} />}
 
-      <div className="flex gap-3">
+      {/* Navigation */}
+      <div className="flex gap-3 pt-1">
         <button type="button" onClick={() => { setError(null); setCurrentIndex(currentIndex - 1); }}
           disabled={currentIndex === 0 || isExpired}
           className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
-          ← Previous
+          ← Prev
         </button>
         {isLast ? (
           <button type="submit" disabled={isSubmitting || isExpired}
             className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">
-            {isSubmitting ? <span className="flex items-center justify-center gap-2"><Spinner />Grading…</span> : "Submit Application"}
+            {isSubmitting ? <span className="flex items-center justify-center gap-2"><Spinner />Grading…</span> : "Submit"}
           </button>
         ) : (
           <button type="button" onClick={handleNext} disabled={isExpired}
@@ -454,9 +472,9 @@ function SuccessState({
 }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="space-y-5">
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center space-y-1">
-        <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700 font-bold text-xl">✓</div>
+    <div className="space-y-4">
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-center space-y-1">
+        <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-green-100 text-green-700 font-bold text-xl">✓</div>
         <p className="text-base font-bold text-slate-900">Application submitted</p>
         <p className="text-sm text-slate-500">Your resume and answers have been saved. Check your email for details.</p>
       </div>
@@ -506,7 +524,7 @@ function SuccessState({
 function RejectedState({ matchResult, onClose }: { matchResult: MatchResult | null; onClose: () => void }) {
   return (
     <div className="space-y-4 py-4 text-center">
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-700 font-bold text-xl">✕</div>
+      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-red-100 text-red-700 font-bold text-xl">✕</div>
       <p className="text-base font-bold text-slate-900">Resume does not match this position</p>
       {typeof matchResult?.score === "number" && (
         <p className="text-sm font-bold text-red-600">Match score: {matchResult.score}/100</p>
@@ -575,9 +593,9 @@ function StepRail({ step, status }: { step: number; status: Stage }) {
               isCurrent ? "bg-blue-50" : isDone ? "bg-slate-50" : "bg-white"
             }`}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <span
-                className={`flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold ${
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold ${
                   isDone
                     ? "bg-blue-600 text-white"
                     : isCurrent
@@ -588,7 +606,7 @@ function StepRail({ step, status }: { step: number; status: Stage }) {
                 {itemStep}
               </span>
               <span
-                className={`hidden truncate text-xs font-bold sm:block ${
+                className={`truncate text-xs font-bold ${
                   isCurrent ? "text-blue-800" : "text-slate-500"
                 }`}
               >
