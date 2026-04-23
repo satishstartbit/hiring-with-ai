@@ -68,13 +68,15 @@ interface InterviewResult {
 }
 
 const SILENCE_TIMEOUT_MS = 2500;
-const MIN_WORDS = 20;
+const INTERVIEW_DURATION_MINUTES = 3;
+const INTERVIEW_DURATION_MS = INTERVIEW_DURATION_MINUTES * 60 * 1000;
+const MIN_WORDS = 10;
 
 export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [session, setSession] = useState<SessionData | null>(null);
   const [currentQIdx, setCurrentQIdx] = useState(0);
-  const [totalQuestions, setTotalQuestions] = useState(8);
+  const [totalQuestions, setTotalQuestions] = useState(3);
   const [aiText, setAiText] = useState("");
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -88,7 +90,20 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   const streamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const forceCompleteRef = useRef(false);
   const accumulatedRef = useRef("");
+
+  function clearInterviewTimer() {
+    if (interviewTimerRef.current) {
+      clearTimeout(interviewTimerRef.current);
+      interviewTimerRef.current = null;
+    }
+  }
+
+  useEffect(() => {
+    return () => clearInterviewTimer();
+  }, []);
 
   // ── Load session ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -212,7 +227,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       setInterimTranscript("");
       const finalText = accumulatedRef.current.trim();
-      if (finalText) submitAnswer(finalText);
+      if (finalText && !forceCompleteRef.current) submitAnswer(finalText);
     };
 
     rec.onerror = () => {
@@ -226,6 +241,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
 
   // ── Send answer to API ────────────────────────────────────────────────────
   const submitAnswer = useCallback(async (answer: string) => {
+    if (forceCompleteRef.current) return;
     if (!answer.trim()) { startListening(); return; }
     setPhase("processing");
     setTranscript("");
@@ -271,6 +287,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
 
   // ── Grade interview ───────────────────────────────────────────────────────
   const gradeInterview = useCallback(async () => {
+    clearInterviewTimer();
     setPhase("grading");
     try {
       const res = await fetch(`/api/interview/${sessionId}/complete`, { method: "POST" });
@@ -284,6 +301,18 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       setPhase("error");
     }
   }, [sessionId]);
+
+  const startInterviewTimer = useCallback(() => {
+    clearInterviewTimer();
+    forceCompleteRef.current = false;
+    interviewTimerRef.current = setTimeout(() => {
+      forceCompleteRef.current = true;
+      recognitionRef.current?.stop();
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+      setAiText("Time is up. Thank you for completing your 3-minute AI interview.");
+      gradeInterview();
+    }, INTERVIEW_DURATION_MS);
+  }, [gradeInterview]);
 
   // ── Start interview ───────────────────────────────────────────────────────
   const startInterview = useCallback(async () => {
@@ -303,16 +332,17 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
         return;
       }
 
-      setTotalQuestions(data.totalQuestions ?? 8);
+      setTotalQuestions(data.totalQuestions ?? 3);
       setCurrentQIdx(data.currentQuestionIndex ?? 0);
       setAiText(data.firstMessage);
+      startInterviewTimer();
       setPhase("ai_speaking");
       speakText(data.firstMessage, () => startListening());
     } catch {
       setErrorMsg("Failed to start interview.");
       setPhase("error");
     }
-  }, [sessionId, speakText, startListening]);
+  }, [sessionId, speakText, startListening, startInterviewTimer]);
 
   // ── Toggle cam/mic ────────────────────────────────────────────────────────
   function toggleCamera() {
@@ -407,7 +437,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
         <div className="w-full max-w-md space-y-6 px-4 text-center">
           <div>
             <p className="text-2xl font-bold text-white">{session?.jobTitle ?? "AI Interview"}</p>
-            <p className="text-sm text-slate-400 mt-1">Hi {session?.candidateName ?? ""} — 10-minute AI mock interview</p>
+            <p className="text-sm text-slate-400 mt-1">Hi {session?.candidateName ?? ""} - 3-minute AI mock interview</p>
           </div>
 
           {isCamEnabled && (
@@ -422,7 +452,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           <div className="space-y-2 text-sm text-slate-400">
             <p>✓ Allow camera & microphone when prompted</p>
             <p>✓ Speak clearly and naturally to answer</p>
-            <p>✓ Keep answers 1–3 minutes per question</p>
+            <p>✓ Keep answers short, around 30-45 seconds each</p>
           </div>
 
           {phase === "ready" && (

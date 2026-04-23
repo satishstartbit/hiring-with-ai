@@ -135,7 +135,7 @@ export async function sendInterviewScheduledEmail(params: InterviewScheduledPara
           <li>Find a quiet, well-lit space</li>
           <li>Allow camera and microphone access when prompted</li>
           <li>Speak clearly — the AI listens to your voice</li>
-          <li>Each answer should be 1–3 minutes</li>
+          <li>Each answer should be short, around 30-45 seconds</li>
         </ul>
         <p style="font-size:14px;color:#475569;margin-top:20px">Best regards,<br/>The Hiring Team</p>
       </div>

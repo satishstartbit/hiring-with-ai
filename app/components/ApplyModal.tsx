@@ -44,6 +44,15 @@ type Stage =
   | "schedule"
   | "success";
 
+const STEP_META: Record<Stage, { eyebrow: string; title: string; step: number }> = {
+  details: { eyebrow: "Step 1 of 4", title: "Candidate details", step: 1 },
+  matched: { eyebrow: "Step 2 of 4", title: "Resume fit", step: 2 },
+  questions: { eyebrow: "Step 3 of 4", title: "Screening questions", step: 3 },
+  schedule: { eyebrow: "Step 4 of 4", title: "Interview scheduling", step: 4 },
+  success: { eyebrow: "Complete", title: "Application submitted", step: 4 },
+  rejected: { eyebrow: "Review complete", title: "Resume screening result", step: 2 },
+};
+
 export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   const [stage, setStage] = useState<Stage>("details");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -95,6 +104,8 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   function formatTime(s: number) {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   }
+
+  const currentStep = STEP_META[stage];
 
   async function handleCheckResume(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -227,33 +238,54 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="max-h-[94vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-2xl">
-        {/* Header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-6 py-4">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Apply for position</h2>
-              <p className="text-xs text-slate-500 mt-0.5">{jobTitle}</p>
+      <div className="max-h-[94vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl">
+        <div className="sticky top-0 z-10 border-b border-slate-200 bg-white">
+          <div className="flex items-start justify-between gap-4 px-5 py-5 sm:px-6">
+            <div className="min-w-0">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="rounded-md bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
+                  {currentStep.eyebrow}
+                </span>
+                <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
+                  Apply for position
+                </span>
+              </div>
+              <h2 className="text-xl font-bold tracking-tight text-slate-950">
+                {currentStep.title}
+              </h2>
+              <p className="mt-1 truncate text-sm font-medium text-slate-500">
+                {jobTitle}
+              </p>
             </div>
-            <button type="button" onClick={onClose}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
-              aria-label="Close">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
+              aria-label="Close"
+            >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M4.47 4.47a.75.75 0 0 1 1.06 0L8 6.94l2.47-2.47a.75.75 0 1 1 1.06 1.06L9.06 8l2.47 2.47a.75.75 0 1 1-1.06 1.06L8 9.06l-2.47 2.47a.75.75 0 0 1-1.06-1.06L6.94 8 4.47 5.53a.75.75 0 0 1 0-1.06Z"/>
+                <path d="M4.47 4.47a.75.75 0 0 1 1.06 0L8 6.94l2.47-2.47a.75.75 0 1 1 1.06 1.06L9.06 8l2.47 2.47a.75.75 0 1 1-1.06 1.06L8 9.06l-2.47 2.47a.75.75 0 0 1-1.06-1.06L6.94 8 4.47 5.53a.75.75 0 0 1 0-1.06Z" />
               </svg>
             </button>
           </div>
+          <StepRail step={currentStep.step} status={stage} />
+        </div>
 
-        <div className="p-6">
+        <div className="max-h-[calc(94vh-128px)] overflow-y-auto bg-slate-50 p-4 sm:p-6">
           {stage === "success" && <SuccessState result={applyResult} scheduledConfirmation={scheduledConfirmation} onClose={onClose} />}
           {stage === "rejected" && <RejectedState matchResult={matchResult} onClose={onClose} />}
 
           {stage === "details" && (
-            <form onSubmit={handleCheckResume} className="space-y-4">
-              <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
-                Upload your resume. Our AI checks your fit before unlocking timed screening questions.
+            <form onSubmit={handleCheckResume} className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-5 rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
+                <p className="font-bold text-blue-900">Start with your resume</p>
+                <p className="mt-1 leading-6">
+                  Our AI checks your fit before unlocking timed screening questions.
+                </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Full name *">
@@ -275,7 +307,7 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
               </div>
               <Field label="Resume (PDF, DOC, TXT — max 5 MB) *">
                 <button type="button" onClick={() => fileInputRef.current?.click()}
-                  className="w-full rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm font-medium text-slate-500 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700">
+                  className="group w-full rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-5 py-6 text-center text-sm font-bold text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700">
                   {resumeFile ? (
                     <span className="flex items-center justify-center gap-2">
                       <span className="text-green-600">✓</span> {resumeFile.name}
@@ -287,25 +319,40 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
               </Field>
               {error && <ErrorMsg message={error} />}
               <button type="submit" disabled={isSubmitting}
-                className="w-full rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                className="w-full rounded-md bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
                 {isSubmitting ? (
                   <span className="flex items-center justify-center gap-2">
                     <Spinner /> AI is reviewing your resume…
                   </span>
                 ) : "Check Resume Fit"}
               </button>
+              </div>
+
+              <aside className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <p className="text-xs font-bold uppercase tracking-wide text-blue-700">
+                  Application flow
+                </p>
+                <div className="mt-4 space-y-3">
+                  <ProcessItem number="1" title="Upload resume" text="Your resume is checked against the role requirements." />
+                  <ProcessItem number="2" title="Answer screening" text="Matched candidates complete a timed role-specific screen." />
+                  <ProcessItem number="3" title="Schedule interview" text="Strong scores unlock a quick AI video interview." />
+                </div>
+                <div className="mt-5 rounded-md border border-blue-100 bg-blue-50 p-3 text-xs leading-5 text-blue-800">
+                  Your details are used only for this hiring workflow and candidate evaluation.
+                </div>
+              </aside>
             </form>
           )}
 
           {stage === "matched" && (
             <div className="space-y-5">
-              <div className="rounded-xl border border-green-200 bg-gradient-to-b from-green-50 to-white p-6 text-center space-y-1">
+              <div className="rounded-lg border border-emerald-200 bg-white p-6 text-center shadow-sm">
                 <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-700 font-bold text-lg">✓</div>
-                <p className="text-xs font-bold uppercase tracking-widest text-green-600">Resume Matched</p>
-                <p className="text-4xl font-bold text-slate-900">{matchResult?.score}<span className="text-xl text-slate-400">/100</span></p>
-                {matchResult?.reason && <p className="text-sm text-slate-600 max-w-md mx-auto mt-1">{matchResult.reason}</p>}
+                <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Resume matched</p>
+                <p className="mt-2 text-5xl font-bold text-slate-950">{matchResult?.score}<span className="text-xl text-slate-400">/100</span></p>
+                {matchResult?.reason && <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-slate-600">{matchResult.reason}</p>}
               </div>
-              <div className="rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm text-amber-800">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
                 Next: a timed screening test — 8 multiple-choice + 2 open-ended questions (20 min limit).
               </div>
               {error && <ErrorMsg message={error} />}
@@ -374,7 +421,7 @@ function ScheduleStage({
         {score !== undefined && (
           <p className="text-3xl font-bold text-slate-900">{score}<span className="text-base text-slate-400">/100</span></p>
         )}
-        <p className="text-sm text-slate-600">Schedule your 10-minute AI video interview with Cal.com to continue.</p>
+        <p className="text-sm text-slate-600">Schedule your 3-minute AI video interview with Cal.com to continue.</p>
       </div>
 
       <div className="space-y-4">
@@ -390,7 +437,7 @@ function ScheduleStage({
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white text-lg">▶</span>
             <div>
               <p className="text-sm font-bold text-blue-800">Start Now</p>
-              <p className="text-xs text-blue-600">Opens your AI video interview immediately (~10 min)</p>
+              <p className="text-xs text-blue-600">Opens your AI video interview immediately (~3 min)</p>
             </div>
           </div>
         </button>
@@ -695,5 +742,71 @@ function Spinner() {
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
     </svg>
+  );
+}
+
+function StepRail({ step, status }: { step: number; status: Stage }) {
+  const labels = ["Profile", "Resume", "Screen", "Interview"];
+
+  return (
+    <div className="grid grid-cols-4 border-t border-slate-100">
+      {labels.map((label, index) => {
+        const itemStep = index + 1;
+        const isCurrent = itemStep === step && status !== "success";
+        const isDone = status === "success" || itemStep < step;
+
+        return (
+          <div
+            key={label}
+            className={`border-r border-slate-100 px-3 py-2 last:border-r-0 ${
+              isCurrent ? "bg-blue-50" : isDone ? "bg-slate-50" : "bg-white"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className={`flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold ${
+                  isDone
+                    ? "bg-blue-600 text-white"
+                    : isCurrent
+                      ? "bg-white text-blue-700 ring-1 ring-blue-200"
+                      : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {itemStep}
+              </span>
+              <span
+                className={`hidden truncate text-xs font-bold sm:block ${
+                  isCurrent ? "text-blue-800" : "text-slate-500"
+                }`}
+              >
+                {label}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProcessItem({
+  number,
+  title,
+  text,
+}: {
+  number: string;
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className="flex gap-3">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-xs font-bold text-slate-700">
+        {number}
+      </span>
+      <div>
+        <p className="text-sm font-bold text-slate-900">{title}</p>
+        <p className="mt-0.5 text-xs leading-5 text-slate-500">{text}</p>
+      </div>
+    </div>
   );
 }

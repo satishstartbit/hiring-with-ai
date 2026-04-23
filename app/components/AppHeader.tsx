@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 const navItems = [
   { href: "/", label: "Dashboard" },
   { href: "/jobs", label: "Job Positions" },
-  { href: "/resumes", label: "Resumes" },
+  // { href: "/resumes", label: "Resumes" },
 ];
 
 export default function AppHeader() {
