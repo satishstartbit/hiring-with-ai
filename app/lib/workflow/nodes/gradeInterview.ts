@@ -61,10 +61,13 @@ function applyAnsweredScoreFloor(score: number, answer: string): number {
 export const gradeInterviewNode = traceable(
   async (state: InterviewState): Promise<Partial<InterviewState>> => {
     try {
-      const llm = createLLM();
+      const llm = createLLM({ maxTokens: 2048 });
 
       const qAndA = state.questions
-        .map((question, index) => `Q${index + 1}: ${question}\nA${index + 1}: ${state.answers[index] ?? "(no answer)"}`)
+        .map((question, index) => {
+          const answer = state.answers[index] ?? "(no answer)";
+          return `Q${index + 1}: ${question}\nA${index + 1}: ${answer.slice(0, 400)}`;
+        })
         .join("\n\n");
 
       const response = await llm.invoke([

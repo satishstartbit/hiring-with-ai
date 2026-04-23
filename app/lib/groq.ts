@@ -4,6 +4,7 @@ export const GROQ_MODEL = "llama-3.1-8b-instant";
 
 interface LLMOptions {
   temperature?: number;
+  maxTokens?: number;
 }
 
 export function createLLM(options: LLMOptions = {}) {
@@ -17,6 +18,7 @@ export function createLLM(options: LLMOptions = {}) {
     model: GROQ_MODEL,
     apiKey,
     temperature: options.temperature ?? 0,
+    maxTokens: options.maxTokens,
   });
 }
 
