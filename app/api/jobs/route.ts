@@ -1,28 +1,42 @@
 import type { NextRequest } from "next/server";
-import { connectDB } from "../../lib/db/connection";
-import Job from "../../lib/db/models/Job";
+import { connectDB } from "@/app/lib/db/connection";
+import Job from "@/app/lib/db/models/Job";
+import { verifySession, requirePermission } from "@/app/lib/auth/dal";
+import { PERMISSIONS } from "@/app/lib/auth/permissions";
+import { JobDraftSchema } from "@/app/lib/validation/jobs";
+import { ok, fromError } from "@/app/lib/api/response";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    const session = await verifySession();
     await connectDB();
-    const jobs = await Job.find().sort({ createdAt: -1 }).limit(50).lean();
-    return Response.json({ jobs });
+    const jobs = await Job.find({ workspaceId: session.workspaceId })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+    return ok({ jobs });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Internal server error";
-    return Response.json({ error: message }, { status: 500 });
+    return fromError(err);
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    await connectDB();
+    const session = await requirePermission(PERMISSIONS.JOB_CREATE);
     const body = await request.json();
-    const job = await Job.create(body);
-    return Response.json({ job }, { status: 201 });
+    const parsed = JobDraftSchema.parse(body);
+    await connectDB();
+    const job = await Job.create({
+      ...parsed,
+      status: "draft",
+      companyId: session.companyId,
+      workspaceId: session.workspaceId,
+      createdBy: session.userId,
+    });
+    return ok({ job }, { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Internal server error";
-    return Response.json({ error: message }, { status: 500 });
+    return fromError(err);
   }
 }
