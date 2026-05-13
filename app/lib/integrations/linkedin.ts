@@ -116,14 +116,13 @@ export async function publishJobToLinkedIn(
   //   };
   // }
 
-  // if (!integration.externalAccountId) {
-  //   return {
-  //     ok: false,
-  //     errorCode: "api_error",
-  //     message:
-  //       "LinkedIn person URN is missing on this integration. Disconnect and reconnect to refresh your profile.",
-  //   };
-  // }
+  if (!integration) {
+    return {
+      ok: false,
+      errorCode: "not_connected",
+      message: "LinkedIn account is not connected for this recruiter.",
+    };
+  }
 
   const author = `urn:li:person:${integration.externalAccountId}`;
 
