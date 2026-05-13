@@ -10,6 +10,29 @@ import { sendScreeningResultEmail } from "../../../../lib/email";
 
 export const dynamic = "force-dynamic";
 
+function parseApplicationAnswers(
+  questionsRaw: string | null,
+  answersRaw: string | null
+): { question: string; answer: string }[] {
+  if (!questionsRaw || !answersRaw) return [];
+  try {
+    const aqs = JSON.parse(questionsRaw);
+    const aas = JSON.parse(answersRaw);
+    if (!Array.isArray(aqs) || !Array.isArray(aas)) return [];
+    return aqs
+      .slice(0, 10)
+      .map((q, i) => {
+        const questionText =
+          q && typeof q === "object" && typeof q.question === "string" ? q.question.trim() : "";
+        const answer = typeof aas[i] === "string" ? aas[i].trim() : "";
+        return { question: questionText, answer };
+      })
+      .filter((p) => p.question.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -27,7 +50,7 @@ export async function POST(
     if (!job) {
       return Response.json({ error: "Job not found" }, { status: 404 });
     }
-    if (job.status !== "active") {
+    if (job.status !== "active" && job.status !== "ai_generated") {
       return Response.json({ error: "This job is no longer accepting applications" }, { status: 400 });
     }
 
@@ -39,6 +62,8 @@ export async function POST(
     const resumeFile = formData.get("resume") as File | null;
     const screeningQuestionsRaw = formData.get("screeningQuestions") as string | null;
     const screeningAnswersRaw = formData.get("screeningAnswers") as string | null;
+    const applicationQuestionsRaw = formData.get("applicationQuestions") as string | null;
+    const applicationAnswersRaw = formData.get("applicationAnswers") as string | null;
     const resumeMatchScoreRaw = formData.get("resumeMatchScore") as string | null;
     const resumeMatchReason = (formData.get("resumeMatchReason") as string | null)?.trim();
     const screeningTimeLimitRaw = formData.get("screeningTimeLimitSeconds") as string | null;
@@ -86,6 +111,11 @@ export async function POST(
       return Response.json({ error: "Screening questions must be answered before applying" }, { status: 400 });
     }
 
+    const applicationAnswers = parseApplicationAnswers(
+      applicationQuestionsRaw,
+      applicationAnswersRaw
+    );
+
     const resumeMatchScore = resumeMatchScoreRaw ? Number.parseInt(resumeMatchScoreRaw, 10) : undefined;
     const screeningTimeLimitSeconds = screeningTimeLimitRaw ? Number.parseInt(screeningTimeLimitRaw, 10) : undefined;
 
@@ -105,6 +135,7 @@ export async function POST(
       resumeData,
       resumeFilename,
       resumeContentType,
+      applicationAnswers,
       screeningQuestions: screeningQuestionsForDb,
       screeningAnswers: answers,
       resumeMatchScore: Number.isFinite(resumeMatchScore) ? resumeMatchScore : undefined,

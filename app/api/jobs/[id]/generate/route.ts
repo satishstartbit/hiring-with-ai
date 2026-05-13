@@ -37,6 +37,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     job.requirements = generated.requirements;
     job.preferredQualifications = generated.preferredQualifications;
     job.screeningQuestions = generated.screeningQuestions;
+    job.applicationQuestions = generated.applicationQuestions;
     job.suggestedSkills = generated.suggestedSkills;
     job.interviewProcessSummary = generated.interviewProcessSummary;
     job.status = "ai_generated";

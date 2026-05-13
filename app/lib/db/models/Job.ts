@@ -22,6 +22,16 @@ export interface IInterviewRound {
   durationMinutes?: number;
 }
 
+export const APPLICATION_QUESTION_KINDS = ["short_text", "long_text", "number"] as const;
+export type ApplicationQuestionKind = (typeof APPLICATION_QUESTION_KINDS)[number];
+
+export interface IApplicationQuestion {
+  question: string;
+  kind: ApplicationQuestionKind;
+  placeholder?: string;
+  required: boolean;
+}
+
 export interface IJob extends Document {
   title: string;
   department: string;
@@ -40,6 +50,7 @@ export interface IJob extends Document {
   numberOfOpenings: number;
   interviewRounds: IInterviewRound[];
   screeningQuestions: string[];
+  applicationQuestions: IApplicationQuestion[];
   interviewProcessSummary: string;
   applicantCount: number;
 
@@ -79,6 +90,16 @@ const InterviewRoundSchema = new Schema<IInterviewRound>(
   { _id: false }
 );
 
+const ApplicationQuestionSchema = new Schema<IApplicationQuestion>(
+  {
+    question: { type: String, required: true, trim: true },
+    kind: { type: String, enum: APPLICATION_QUESTION_KINDS, default: "short_text" },
+    placeholder: { type: String, trim: true },
+    required: { type: Boolean, default: true },
+  },
+  { _id: false }
+);
+
 const JobSchema = new Schema<IJob>(
   {
     title: { type: String, required: true, trim: true },
@@ -98,6 +119,7 @@ const JobSchema = new Schema<IJob>(
     numberOfOpenings: { type: Number, default: 1, min: 1 },
     interviewRounds: { type: [InterviewRoundSchema], default: [] },
     screeningQuestions: { type: [String], default: [] },
+    applicationQuestions: { type: [ApplicationQuestionSchema], default: [] },
     interviewProcessSummary: { type: String, default: "" },
     applicantCount: { type: Number, default: 0 },
 

@@ -24,7 +24,7 @@ export async function POST(
     if (!job) {
       return Response.json({ error: "Job not found" }, { status: 404 });
     }
-    if (job.status !== "active") {
+    if (job.status !== "active" && job.status !== "ai_generated") {
       return Response.json(
         { error: "This job is no longer accepting applications" },
         { status: 400 }

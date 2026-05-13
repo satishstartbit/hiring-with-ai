@@ -1,5 +1,10 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 
+export interface IApplicationAnswer {
+  question: string;
+  answer: string;
+}
+
 export interface ICandidate extends Document {
   name: string;
   email: string;
@@ -13,6 +18,7 @@ export interface ICandidate extends Document {
   resumeData?: Buffer;
   resumeFilename?: string;
   resumeContentType?: string;
+  applicationAnswers?: IApplicationAnswer[];
   screeningQuestions?: string[];
   screeningAnswers?: string[];
   resumeMatchScore?: number;
@@ -50,6 +56,18 @@ const CandidateSchema = new Schema<ICandidate>(
     resumeData: { type: Buffer },
     resumeFilename: { type: String },
     resumeContentType: { type: String },
+    applicationAnswers: {
+      type: [
+        new Schema<IApplicationAnswer>(
+          {
+            question: { type: String, required: true },
+            answer: { type: String, default: "" },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     screeningQuestions: [{ type: String }],
     screeningAnswers: [{ type: String }],
     resumeMatchScore: { type: Number },

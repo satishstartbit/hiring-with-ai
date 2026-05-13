@@ -20,12 +20,20 @@ export type JobGenerationInput = {
   preferredQualifications?: string[];
 };
 
+export type ApplicationQuestion = {
+  question: string;
+  kind: "short_text" | "long_text" | "number";
+  placeholder?: string;
+  required: boolean;
+};
+
 export type JobGenerationOutput = {
   description: string;
   responsibilities: string[];
   requirements: string[];
   preferredQualifications: string[];
   screeningQuestions: string[];
+  applicationQuestions: ApplicationQuestion[];
   suggestedSkills: string[];
   interviewProcessSummary: string;
 };
@@ -83,13 +91,50 @@ Return JSON with EXACTLY these keys:
   "requirements": ["...", "..."],
   "preferredQualifications": ["...", "..."],
   "screeningQuestions": ["short answer questions a recruiter asks at first screen", "..."],
+  "applicationQuestions": [
+    { "question": "How many years of experience do you have with <primary stack>?", "kind": "number", "placeholder": "e.g. 4", "required": true },
+    { "question": "What is your current annual compensation (CTC)?", "kind": "short_text", "placeholder": "e.g. ₹12 LPA or $90,000", "required": true },
+    { "question": "What are your salary expectations for this role?", "kind": "short_text", "placeholder": "e.g. ₹18 LPA or $120,000", "required": true },
+    { "question": "What is your current notice period?", "kind": "short_text", "placeholder": "e.g. 30 days, immediate", "required": true },
+    { "question": "Why are you interested in this role?", "kind": "long_text", "placeholder": "2-3 sentences", "required": true }
+  ],
   "suggestedSkills": ["skills you would add beyond what was provided", "..."],
   "interviewProcessSummary": "1-2 sentence overview of the interview process"
-}`;
+}
+
+Rules for applicationQuestions:
+- Generate 5-7 concise questions a candidate fills out when they apply (not a quiz — these gather profile info: years of experience in the key stack/skills for THIS role, current compensation, expected compensation, notice period / availability, location/relocation if relevant, motivation for the role, link to portfolio/github if relevant).
+- "kind" must be one of: "short_text", "long_text", "number". Use "number" only for pure numeric inputs (e.g. years of experience), "long_text" for open-ended motivation/expectation questions, "short_text" for everything else.
+- "required" is a boolean. Mark essential questions (experience, compensation, notice period) as required.
+- Tailor at least one question to the specific stack/skills/level of THIS role (e.g. "Years of experience with React + TypeScript?" — not generic "years of experience").`;
 }
 
 function safeArray(v: unknown, fallback: string[] = []): string[] {
   return Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()).map((x) => x.trim()) : fallback;
+}
+
+function safeApplicationQuestions(v: unknown): ApplicationQuestion[] {
+  if (!Array.isArray(v)) return [];
+  const allowedKinds: ApplicationQuestion["kind"][] = ["short_text", "long_text", "number"];
+  const out: ApplicationQuestion[] = [];
+  for (const raw of v) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+    const question = typeof r.question === "string" ? r.question.trim() : "";
+    if (!question) continue;
+    const kindRaw = typeof r.kind === "string" ? r.kind : "short_text";
+    const kind = (allowedKinds as string[]).includes(kindRaw)
+      ? (kindRaw as ApplicationQuestion["kind"])
+      : "short_text";
+    const placeholder =
+      typeof r.placeholder === "string" && r.placeholder.trim()
+        ? r.placeholder.trim()
+        : undefined;
+    const required = r.required === false ? false : true;
+    out.push({ question, kind, placeholder, required });
+    if (out.length >= 7) break;
+  }
+  return out;
 }
 
 function escapeControlCharsInStrings(input: string): string {
@@ -236,6 +281,7 @@ export async function generateJobContent(
       requirements: safeArray(parsed.requirements),
       preferredQualifications: safeArray(parsed.preferredQualifications),
       screeningQuestions: safeArray(parsed.screeningQuestions),
+      applicationQuestions: safeApplicationQuestions(parsed.applicationQuestions),
       suggestedSkills: safeArray(parsed.suggestedSkills),
       interviewProcessSummary:
         typeof parsed.interviewProcessSummary === "string"

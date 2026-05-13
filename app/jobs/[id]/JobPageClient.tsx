@@ -5,6 +5,13 @@ import Link from "next/link";
 import ApplicantsTable from "../../components/ApplicantsTable";
 import ApplyJobButton from "../../components/ApplyJobButton";
 
+export interface PublicApplicationQuestion {
+  question: string;
+  kind: "short_text" | "long_text" | "number";
+  placeholder?: string;
+  required: boolean;
+}
+
 export interface PublicJob {
   _id: string;
   title: string;
@@ -17,6 +24,7 @@ export interface PublicJob {
   applicantCount: number;
   createdAt: string;
   postedAt?: string;
+  applicationQuestions: PublicApplicationQuestion[];
 }
 
 interface Candidate {
@@ -131,8 +139,12 @@ export default function JobPageClient({ job }: Readonly<{ job: PublicJob }>) {
                 <span className={`h-1.5 w-1.5 rounded-full ${statusStyle.dot}`} />
                 {job.status}
               </span>
-              {job.status === "active" && (
-                <ApplyJobButton jobId={job._id} jobTitle={job.title} />
+              {(job.status === "active" || job.status === "ai_generated") && (
+                <ApplyJobButton
+                  jobId={job._id}
+                  jobTitle={job.title}
+                  applicationQuestions={job.applicationQuestions}
+                />
               )}
             </div>
           </div>

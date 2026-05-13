@@ -1,10 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
+import type { PublicApplicationQuestion } from "../jobs/[id]/JobPageClient";
+import {
+  useProctoring,
+  type ProctoringStatus,
+  type ProctoringViolation,
+} from "./proctoring/useProctoring";
+import CameraPreview from "./proctoring/CameraPreview";
 
 interface Props {
   jobId: string;
   jobTitle: string;
+  applicationQuestions: PublicApplicationQuestion[];
   onClose: () => void;
 }
 
@@ -39,19 +48,69 @@ interface ApplyResult {
 type Stage =
   | "details"
   | "matched"
+  | "camera_consent"
   | "questions"
   | "rejected"
+  | "terminated"
   | "success";
 
 const STEP_META: Record<Stage, { eyebrow: string; title: string; step: number }> = {
   details: { eyebrow: "Step 1 of 3", title: "Candidate details", step: 1 },
   matched: { eyebrow: "Step 2 of 3", title: "Resume fit", step: 2 },
+  camera_consent: { eyebrow: "Step 3 of 3", title: "Enable your camera", step: 3 },
   questions: { eyebrow: "Step 3 of 3", title: "Screening questions", step: 3 },
   success: { eyebrow: "Complete", title: "Application submitted", step: 3 },
   rejected: { eyebrow: "Review complete", title: "Resume screening result", step: 2 },
+  terminated: { eyebrow: "Quiz ended", title: "Screening terminated", step: 3 },
 };
 
-export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
+function describeCameraError(err: unknown): string {
+  if (err instanceof DOMException) {
+    switch (err.name) {
+      case "NotAllowedError":
+      case "PermissionDeniedError":
+        return "Camera permission was denied. Click the camera icon in the address bar, set this site to Allow, then click the button again.";
+      case "NotFoundError":
+      case "DevicesNotFoundError":
+        return "No camera was found. Plug in a webcam (or enable your built-in one) and try again.";
+      case "NotReadableError":
+      case "TrackStartError":
+        return "Your camera is being used by another app. Close Zoom, Teams, OBS, or any other app that might have the camera, then try again.";
+      case "OverconstrainedError":
+      case "ConstraintNotSatisfiedError":
+        return "Your camera could not match the requested settings. Try a different camera if you have one connected.";
+      case "SecurityError":
+        return "Camera access is blocked because this page isn't on a secure (HTTPS) origin.";
+      case "AbortError":
+        return "Camera startup was interrupted. Try again.";
+    }
+    if (err.message) return `Camera error: ${err.message}`;
+  }
+  if (err instanceof Error && err.message) return `Camera error: ${err.message}`;
+  return "Camera access failed. Try again, or use a different browser / device.";
+}
+
+const TERMINATION_MESSAGES: Record<ProctoringViolation, string> = {
+  camera_denied:
+    "Camera access was not granted. The screening quiz requires a working webcam.",
+  camera_lost:
+    "Your camera disconnected during the quiz. The screening was ended for integrity reasons.",
+  tab_switch:
+    "You switched to another tab during the quiz. Leaving the screening tab is not allowed.",
+  window_blur:
+    "You switched to another window during the quiz. The screening must stay focused.",
+  multi_face:
+    "More than one person was detected on camera. Screenings must be taken alone.",
+  no_face:
+    "We could not see your face for several seconds. Please stay in frame during the quiz.",
+};
+
+export default function ApplyModal({
+  jobId,
+  jobTitle,
+  applicationQuestions,
+  onClose,
+}: Readonly<Props>) {
   const [stage, setStage] = useState<Stage>("details");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +120,9 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   const [currentTitle, setCurrentTitle] = useState("");
   const [currentCompany, setCurrentCompany] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [applicationAnswers, setApplicationAnswers] = useState<string[]>(
+    () => applicationQuestions.map(() => "")
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
@@ -71,6 +133,17 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
   const [isExpired, setIsExpired] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
+  const [terminationReason, setTerminationReason] = useState<ProctoringViolation | null>(null);
+
+  const handleProctoringTerminate = useCallback((reason: ProctoringViolation) => {
+    setTerminationReason(reason);
+    setStage("terminated");
+  }, []);
+
+  const { videoRef, status: proctoringStatus, faceCount } = useProctoring({
+    enabled: stage === "questions",
+    onTerminate: handleProctoringTerminate,
+  });
 
   useEffect(() => {
     if (stage !== "questions" || timeLeft <= 0 || isExpired) return;
@@ -96,6 +169,10 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
     fd.append("currentTitle", currentTitle);
     fd.append("currentCompany", currentCompany);
     if (resumeFile) fd.append("resume", resumeFile);
+    if (applicationQuestions.length > 0) {
+      fd.append("applicationQuestions", JSON.stringify(applicationQuestions));
+      fd.append("applicationAnswers", JSON.stringify(applicationAnswers));
+    }
     return fd;
   }
 
@@ -109,6 +186,13 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
     e.preventDefault();
     if (isSubmitting) return;
     if (!resumeFile) { setError("Resume is required before AI screening."); return; }
+    const missingIdx = applicationQuestions.findIndex(
+      (q, i) => q.required && !applicationAnswers[i]?.trim()
+    );
+    if (missingIdx !== -1) {
+      setError(`Please answer: "${applicationQuestions[missingIdx].question}"`);
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
     try {
@@ -142,9 +226,46 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
       setTimeLeft(data.timeLimitSeconds ?? 20 * 60);
       setIsExpired(false);
       setCurrentIndex(0);
-      setStage("questions");
+      setStage("camera_consent");
     } catch {
       setError("Network error — please try again");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  // The candidate explicitly grants camera permission here before the proctored
+  // quiz starts. This avoids the awful UX of "Quiz terminated — camera denied"
+  // appearing the instant the candidate hits an OS permission prompt they
+  // weren't expecting.
+  async function handleEnableCamera() {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      // Try preferred constraints first, then fall back to bare { video: true }
+      // — some webcams (and some Edge/Windows combos) reject the resolution or
+      // facingMode hint with OverconstrainedError even when the camera works.
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 320, height: 240, facingMode: "user" },
+          audio: false,
+        });
+      } catch (firstErr) {
+        if (firstErr instanceof DOMException && firstErr.name === "OverconstrainedError") {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        } else {
+          throw firstErr;
+        }
+      }
+      // Stop this probe stream immediately — useProctoring will acquire a fresh
+      // one when the quiz stage mounts. The browser remembers the grant for
+      // this tab, so the second request won't re-prompt the user.
+      for (const track of stream.getTracks()) track.stop();
+      setStage("questions");
+    } catch (err) {
+      setError(describeCameraError(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -275,6 +396,28 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
                       onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)} />
                   </Field>
                 </div>
+
+                {applicationQuestions.length > 0 && (
+                  <div className="mt-5 space-y-3 border-t border-slate-100 pt-4">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                      A few quick questions
+                    </p>
+                    {applicationQuestions.map((q, i) => (
+                      <ApplicationQuestionField
+                        key={i}
+                        question={q}
+                        value={applicationAnswers[i] ?? ""}
+                        onChange={(v) => {
+                          const next = [...applicationAnswers];
+                          next[i] = v;
+                          setApplicationAnswers(next);
+                          if (error) setError(null);
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+
                 {error && <div className="mt-3"><ErrorMsg message={error} /></div>}
                 <button type="submit" disabled={isSubmitting}
                   className="mt-4 w-full rounded-md bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
@@ -322,6 +465,58 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
             </div>
           )}
 
+          {stage === "camera_consent" && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-blue-200 bg-white p-5 shadow-sm">
+                <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 text-2xl">
+                  <span aria-hidden>📷</span>
+                </div>
+                <h3 className="text-center text-base font-bold text-slate-900">
+                  Camera access required
+                </h3>
+                <p className="mx-auto mt-2 max-w-md text-center text-sm leading-6 text-slate-600">
+                  The screening quiz is proctored. We need to see you on camera to
+                  verify it&apos;s you taking the test, alone and on this tab.
+                </p>
+                <ul className="mx-auto mt-4 max-w-md space-y-2 text-sm text-slate-700">
+                  <li className="flex items-start gap-2">
+                    <span className="mt-0.5 text-emerald-600">✓</span>
+                    <span>Your webcam stays on for the duration of the quiz.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-0.5 text-emerald-600">✓</span>
+                    <span>No recording is stored — face count is checked in your browser.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-0.5 text-amber-600">!</span>
+                    <span>
+                      Switching tabs, leaving the camera, or anyone else in the frame
+                      ends the quiz immediately.
+                    </span>
+                  </li>
+                </ul>
+                {error && <div className="mt-4"><ErrorMsg message={error} /></div>}
+                <button
+                  type="button"
+                  onClick={handleEnableCamera}
+                  disabled={isSubmitting}
+                  className="mt-5 w-full rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <Spinner /> Waiting for camera permission…
+                    </span>
+                  ) : (
+                    "Allow camera & start quiz"
+                  )}
+                </button>
+                <p className="mt-2 text-center text-xs text-slate-500">
+                  Your browser will ask for permission. Click &ldquo;Allow&rdquo;.
+                </p>
+              </div>
+            </div>
+          )}
+
           {stage === "questions" && (
             <QuestionsStage
               matchResult={matchResult}
@@ -337,7 +532,14 @@ export default function ApplyModal({ jobId, jobTitle, onClose }: Props) {
               setError={setError}
               onSubmit={handleFinalSubmit}
               formatTime={formatTime}
+              videoRef={videoRef}
+              proctoringStatus={proctoringStatus}
+              faceCount={faceCount}
             />
+          )}
+
+          {stage === "terminated" && terminationReason && (
+            <TerminatedState reason={terminationReason} onClose={onClose} />
           )}
         </div>
       </div>
@@ -361,12 +563,16 @@ interface QuestionsStageProps {
   setError: (e: string | null) => void;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
   formatTime: (s: number) => string;
+  videoRef: RefObject<HTMLVideoElement | null>;
+  proctoringStatus: ProctoringStatus;
+  faceCount: number | null;
 }
 
 function QuestionsStage({
   matchResult, questions, answers, setAnswers, currentIndex, setCurrentIndex,
   timeLeft, isExpired, isSubmitting, error, setError, onSubmit, formatTime,
-}: QuestionsStageProps) {
+  videoRef, proctoringStatus, faceCount,
+}: Readonly<QuestionsStageProps>) {
   const total = questions.length;
   const isLast = currentIndex === total - 1;
   const answeredCount = answers.filter((a) => a.trim()).length;
@@ -380,11 +586,22 @@ function QuestionsStage({
 
   return (
     <form onSubmit={onSubmit} className="space-y-3">
-      {/* Timer + match bar */}
+      {/* Timer + match bar + camera */}
       <div className="flex items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5">
         <p className="text-xs font-bold text-blue-900 sm:text-sm">Match: {matchResult?.score ?? 0}/100</p>
         <div className={`rounded-lg px-3 py-1 text-sm font-bold tabular-nums ${isExpired ? "bg-red-600 text-white" : "bg-white text-blue-700 border border-blue-200"}`}>
           {formatTime(timeLeft)}
+        </div>
+      </div>
+
+      <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+        <CameraPreview videoRef={videoRef} status={proctoringStatus} faceCount={faceCount} />
+        <div className="flex-1 text-xs leading-5 text-amber-900">
+          <p className="font-bold">Proctored quiz</p>
+          <p className="mt-1">
+            Stay alone in frame, in this tab. Switching tabs or windows, leaving the camera, or
+            anyone else appearing in the frame will end the quiz immediately.
+          </p>
         </div>
       </div>
 
@@ -521,6 +738,29 @@ function SuccessState({
   );
 }
 
+function TerminatedState({
+  reason,
+  onClose,
+}: Readonly<{
+  reason: ProctoringViolation;
+  onClose: () => void;
+}>) {
+  return (
+    <div className="space-y-4 py-4 text-center">
+      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-red-100 text-red-700 font-bold text-xl">!</div>
+      <p className="text-base font-bold text-slate-900">Screening quiz ended</p>
+      <p className="mx-auto max-w-md text-sm text-slate-600">
+        {TERMINATION_MESSAGES[reason]}
+      </p>
+      <p className="text-xs text-slate-400">Your application has not been submitted.</p>
+      <button type="button" onClick={onClose}
+        className="rounded-lg bg-red-600 px-6 py-2.5 text-sm font-bold text-white hover:bg-red-700">
+        Close
+      </button>
+    </div>
+  );
+}
+
 function RejectedState({ matchResult, onClose }: { matchResult: MatchResult | null; onClose: () => void }) {
   return (
     <div className="space-y-4 py-4 text-center">
@@ -555,6 +795,46 @@ function ErrorMsg({ message }: { message: string }) {
     <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
       {message}
     </p>
+  );
+}
+
+function ApplicationQuestionField({
+  question,
+  value,
+  onChange,
+}: Readonly<{
+  question: PublicApplicationQuestion;
+  value: string;
+  onChange: (v: string) => void;
+}>) {
+  const label = `${question.question}${question.required ? " *" : ""}`;
+  if (question.kind === "long_text") {
+    return (
+      <Field label={label}>
+        <textarea
+          rows={3}
+          required={question.required}
+          value={value}
+          placeholder={question.placeholder ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+          className="field-input resize-none"
+        />
+      </Field>
+    );
+  }
+  return (
+    <Field label={label}>
+      <input
+        type={question.kind === "number" ? "number" : "text"}
+        inputMode={question.kind === "number" ? "numeric" : undefined}
+        min={question.kind === "number" ? 0 : undefined}
+        required={question.required}
+        value={value}
+        placeholder={question.placeholder ?? ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="field-input"
+      />
+    </Field>
   );
 }
 

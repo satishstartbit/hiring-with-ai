@@ -4,6 +4,13 @@ import Candidate from "../db/models/Candidate";
 import Job from "../db/models/Job";
 import InterviewSession from "../db/models/InterviewSession";
 
+export interface ApplicationQuestionSummary {
+  question: string;
+  kind: "short_text" | "long_text" | "number";
+  placeholder?: string;
+  required: boolean;
+}
+
 export interface JobSummary {
   _id: string;
   title: string;
@@ -16,6 +23,7 @@ export interface JobSummary {
   applicantCount: number;
   createdAt: string;
   postedAt?: string;
+  applicationQuestions: ApplicationQuestionSummary[];
 }
 
 export interface CandidateSummary {
@@ -53,6 +61,7 @@ interface LeanJob {
   applicantCount?: number;
   createdAt?: Date;
   postedAt?: Date;
+  applicationQuestions?: ApplicationQuestionSummary[];
 }
 
 interface LeanCandidate {
@@ -98,6 +107,12 @@ function serializeJob(job: LeanJob): JobSummary {
     applicantCount: job.applicantCount ?? 0,
     createdAt: dateToString(job.createdAt),
     postedAt: optionalDateToString(job.postedAt),
+    applicationQuestions: (job.applicationQuestions ?? []).map((q) => ({
+      question: q.question,
+      kind: q.kind,
+      placeholder: q.placeholder,
+      required: q.required,
+    })),
   };
 }
 

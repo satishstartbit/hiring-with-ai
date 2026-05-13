@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import mongoose from "mongoose";
 import { connectDB } from "../../lib/db/connection";
 import Job from "../../lib/db/models/Job";
-import JobPageClient, { type PublicJob } from "./JobPageClient";
+import JobPageClient, { type PublicJob, type PublicApplicationQuestion } from "./JobPageClient";
 
 function appBase(): string {
   return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
@@ -14,6 +14,14 @@ async function loadJob(id: string): Promise<PublicJob | null> {
   await connectDB();
   const doc = await Job.findById(id).lean();
   if (!doc) return null;
+  const applicationQuestions: PublicApplicationQuestion[] = (doc.applicationQuestions ?? []).map(
+    (q) => ({
+      question: q.question,
+      kind: q.kind,
+      placeholder: q.placeholder,
+      required: q.required,
+    })
+  );
   return {
     _id: String(doc._id),
     title: doc.title,
@@ -26,6 +34,7 @@ async function loadJob(id: string): Promise<PublicJob | null> {
     applicantCount: doc.applicantCount ?? 0,
     createdAt: (doc.createdAt instanceof Date ? doc.createdAt : new Date()).toISOString(),
     postedAt: doc.postedAt ? new Date(doc.postedAt).toISOString() : undefined,
+    applicationQuestions,
   };
 }
 

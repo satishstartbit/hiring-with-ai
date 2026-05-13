@@ -2,14 +2,17 @@
 
 import { useState } from "react";
 import ApplyModal from "./ApplyModal";
+import type { PublicApplicationQuestion } from "../jobs/[id]/JobPageClient";
 
 export default function ApplyJobButton({
   jobId,
   jobTitle,
-}: {
+  applicationQuestions,
+}: Readonly<{
   jobId: string;
   jobTitle: string;
-}) {
+  applicationQuestions: PublicApplicationQuestion[];
+}>) {
   const [showModal, setShowModal] = useState(false);
 
   return (
@@ -25,6 +28,7 @@ export default function ApplyJobButton({
         <ApplyModal
           jobId={jobId}
           jobTitle={jobTitle}
+          applicationQuestions={applicationQuestions}
           onClose={() => setShowModal(false)}
         />
       )}

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import ApplyModal from "./ApplyModal";
+import type { PublicApplicationQuestion } from "../jobs/[id]/JobPageClient";
 
 interface Job {
   _id: string;
@@ -15,6 +16,7 @@ interface Job {
   description?: string;
   requirements?: string[];
   createdAt: string;
+  applicationQuestions?: PublicApplicationQuestion[];
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -108,7 +110,7 @@ export default function JobCard({ job }: { readonly job: Job }) {
               >
                 View Details
               </Link>
-              {job.status === "active" && (
+              {(job.status === "active" || job.status === "ai_generated") && (
                 <button
                   type="button"
                   onClick={() => setShowModal(true)}
@@ -126,6 +128,7 @@ export default function JobCard({ job }: { readonly job: Job }) {
         <ApplyModal
           jobId={job._id}
           jobTitle={job.title}
+          applicationQuestions={job.applicationQuestions ?? []}
           onClose={() => setShowModal(false)}
         />
       )}
