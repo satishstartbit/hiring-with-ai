@@ -5,6 +5,7 @@ import Candidate, { type CandidateStage } from "@/app/lib/db/models/Candidate";
 import InterviewSession from "@/app/lib/db/models/InterviewSession";
 
 export const dynamic = "force-dynamic";
+
 export const metadata = { title: "Profile — HireAI" };
 
 interface Stats {
