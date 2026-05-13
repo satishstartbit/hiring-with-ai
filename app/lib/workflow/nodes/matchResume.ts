@@ -40,7 +40,7 @@ export const matchResumeNode = traceable(
           `Candidate name: ${state.candidateName}`,
           `Current title: ${state.candidateTitle || "Not provided"}`,
           "",
-          `Resume (extracted text): ${state.resumeText}`,
+          `Resume (extracted text): ${state.resumeText}`, 
         ].join("\n")
       ),
     ]);

@@ -4,6 +4,7 @@ import { verifySession } from "@/app/lib/auth/dal";
 import { connectDB } from "@/app/lib/db/connection";
 import Job from "@/app/lib/db/models/Job";
 import { JobPublication } from "@/app/lib/db/models/JobPublication";
+import AssessmentConfig from "@/app/lib/db/models/AssessmentConfig";
 import type { IntegrationProvider } from "@/app/lib/db/models/Integration";
 import RepublishButton from "./RepublishButton";
 import ShareToLinkedInButton from "./ShareToLinkedInButton";
@@ -33,6 +34,10 @@ export default async function JobDetailPage({
     workspaceId: session.workspaceId,
   })
     .sort({ publishedAt: -1, createdAt: -1 })
+    .lean();
+
+  const assessmentConfig = await AssessmentConfig.findOne({ jobId: job._id })
+    .select("isPublished publishedAt difficulty durationMinutes questionCount enabledQuestionTypes")
     .lean();
 
   return (
@@ -84,6 +89,38 @@ export default async function JobDetailPage({
           <p className="text-sm text-slate-700">{job.interviewProcessSummary}</p>
         </section>
       )}
+
+      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">AI Assessment</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {assessmentConfig ? (
+                <>
+                  {assessmentConfig.isPublished ? (
+                    <span className="font-medium text-emerald-700">Live · </span>
+                  ) : (
+                    <span className="font-medium text-amber-700">Draft · </span>
+                  )}
+                  {assessmentConfig.difficulty} difficulty ·{" "}
+                  {assessmentConfig.durationMinutes} min ·{" "}
+                  {assessmentConfig.questionCount} questions ·{" "}
+                  {assessmentConfig.enabledQuestionTypes.length} question types
+                </>
+              ) : (
+                <>No assessment configured yet. Set difficulty, question types, skills, anti-cheat and passing criteria.</>
+              )}
+            </p>
+          </div>
+          <Link
+            href={`/dashboard/jobs/${String(job._id)}/assessment`}
+            className="flex-none rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {assessmentConfig ? "Edit assessment" : "Configure assessment"}
+          </Link>
+        </div>
+      </section>
+
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
