@@ -5,6 +5,12 @@ export interface IApplicationAnswer {
   answer: string;
 }
 
+export interface IProctoringSnapshot {
+  data: Buffer;
+  contentType: string;
+  capturedAt: Date;
+}
+
 export interface ICandidate extends Document {
   name: string;
   email: string;
@@ -19,6 +25,7 @@ export interface ICandidate extends Document {
   resumeFilename?: string;
   resumeContentType?: string;
   applicationAnswers?: IApplicationAnswer[];
+  proctoringSnapshots?: IProctoringSnapshot[];
   screeningQuestions?: string[];
   screeningAnswers?: string[];
   resumeMatchScore?: number;
@@ -62,6 +69,19 @@ const CandidateSchema = new Schema<ICandidate>(
           {
             question: { type: String, required: true },
             answer: { type: String, default: "" },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
+    proctoringSnapshots: {
+      type: [
+        new Schema<IProctoringSnapshot>(
+          {
+            data: { type: Buffer, required: true },
+            contentType: { type: String, default: "image/jpeg" },
+            capturedAt: { type: Date, default: Date.now },
           },
           { _id: false }
         ),

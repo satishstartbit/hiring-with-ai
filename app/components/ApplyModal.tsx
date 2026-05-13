@@ -134,15 +134,21 @@ export default function ApplyModal({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
   const [terminationReason, setTerminationReason] = useState<ProctoringViolation | null>(null);
+  const proctoringSnapshotsRef = useRef<string[]>([]);
 
   const handleProctoringTerminate = useCallback((reason: ProctoringViolation) => {
     setTerminationReason(reason);
     setStage("terminated");
   }, []);
 
-  const { videoRef, status: proctoringStatus, faceCount } = useProctoring({
+  const handleProctoringSnapshot = useCallback((dataUrl: string) => {
+    proctoringSnapshotsRef.current.push(dataUrl);
+  }, []);
+
+  const { videoRef, status: proctoringStatus, faceCount, detectorReady } = useProctoring({
     enabled: stage === "questions",
     onTerminate: handleProctoringTerminate,
+    onSnapshot: handleProctoringSnapshot,
   });
 
   useEffect(() => {
@@ -285,6 +291,9 @@ export default function ApplyModal({
     fd.append("resumeMatchScore", String(matchResult?.score ?? ""));
     fd.append("resumeMatchReason", matchResult?.reason ?? "");
     fd.append("screeningTimeLimitSeconds", String(timeLimitSeconds));
+    if (proctoringSnapshotsRef.current.length > 0) {
+      fd.append("proctoringSnapshots", JSON.stringify(proctoringSnapshotsRef.current));
+    }
     setIsSubmitting(true);
     setError(null);
     try {
@@ -535,6 +544,7 @@ export default function ApplyModal({
               videoRef={videoRef}
               proctoringStatus={proctoringStatus}
               faceCount={faceCount}
+              detectorReady={detectorReady}
             />
           )}
 
@@ -566,12 +576,13 @@ interface QuestionsStageProps {
   videoRef: RefObject<HTMLVideoElement | null>;
   proctoringStatus: ProctoringStatus;
   faceCount: number | null;
+  detectorReady: boolean;
 }
 
 function QuestionsStage({
   matchResult, questions, answers, setAnswers, currentIndex, setCurrentIndex,
   timeLeft, isExpired, isSubmitting, error, setError, onSubmit, formatTime,
-  videoRef, proctoringStatus, faceCount,
+  videoRef, proctoringStatus, faceCount, detectorReady,
 }: Readonly<QuestionsStageProps>) {
   const total = questions.length;
   const isLast = currentIndex === total - 1;
@@ -595,7 +606,12 @@ function QuestionsStage({
       </div>
 
       <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-        <CameraPreview videoRef={videoRef} status={proctoringStatus} faceCount={faceCount} />
+        <CameraPreview
+          videoRef={videoRef}
+          status={proctoringStatus}
+          faceCount={faceCount}
+          detectorReady={detectorReady}
+        />
         <div className="flex-1 text-xs leading-5 text-amber-900">
           <p className="font-bold">Proctored quiz</p>
           <p className="mt-1">

@@ -33,6 +33,36 @@ function parseApplicationAnswers(
   }
 }
 
+function parseProctoringSnapshots(
+  raw: string | null
+): { data: Buffer; contentType: string; capturedAt: Date }[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: { data: Buffer; contentType: string; capturedAt: Date }[] = [];
+  const now = Date.now();
+  for (let i = 0; i < parsed.length && out.length < 10; i++) {
+    const entry = parsed[i];
+    if (typeof entry !== "string") continue;
+    // Expected: "data:image/jpeg;base64,...". We accept any image/* mime.
+    const match = /^data:(image\/[a-zA-Z+.-]+);base64,(.+)$/.exec(entry);
+    if (!match) continue;
+    const buffer = Buffer.from(match[2], "base64");
+    if (buffer.length === 0 || buffer.length > 512 * 1024) continue;
+    out.push({
+      data: buffer,
+      contentType: match[1],
+      capturedAt: new Date(now + i),
+    });
+  }
+  return out;
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -64,6 +94,7 @@ export async function POST(
     const screeningAnswersRaw = formData.get("screeningAnswers") as string | null;
     const applicationQuestionsRaw = formData.get("applicationQuestions") as string | null;
     const applicationAnswersRaw = formData.get("applicationAnswers") as string | null;
+    const proctoringSnapshotsRaw = formData.get("proctoringSnapshots") as string | null;
     const resumeMatchScoreRaw = formData.get("resumeMatchScore") as string | null;
     const resumeMatchReason = (formData.get("resumeMatchReason") as string | null)?.trim();
     const screeningTimeLimitRaw = formData.get("screeningTimeLimitSeconds") as string | null;
@@ -115,6 +146,7 @@ export async function POST(
       applicationQuestionsRaw,
       applicationAnswersRaw
     );
+    const proctoringSnapshots = parseProctoringSnapshots(proctoringSnapshotsRaw);
 
     const resumeMatchScore = resumeMatchScoreRaw ? Number.parseInt(resumeMatchScoreRaw, 10) : undefined;
     const screeningTimeLimitSeconds = screeningTimeLimitRaw ? Number.parseInt(screeningTimeLimitRaw, 10) : undefined;
@@ -136,6 +168,7 @@ export async function POST(
       resumeFilename,
       resumeContentType,
       applicationAnswers,
+      proctoringSnapshots,
       screeningQuestions: screeningQuestionsForDb,
       screeningAnswers: answers,
       resumeMatchScore: Number.isFinite(resumeMatchScore) ? resumeMatchScore : undefined,
