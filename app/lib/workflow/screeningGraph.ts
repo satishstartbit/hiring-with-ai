@@ -3,10 +3,15 @@ import { ScreeningStateAnnotation } from "./screeningState";
 import { matchResumeNode } from "./nodes/matchResume";
 import { generateQuestionsNode } from "./nodes/generateQuestions";
 import { traceable } from "langsmith/traceable";
+import type {
+  DifficultyLevel,
+  QuestionType,
+  QuestionCountMode,
+} from "../constants/assessment";
 
 export type { ScreeningQuestion } from "./screeningState";
 
-const SCREENING_TIME_LIMIT_SECONDS = 20 * 60;
+const DEFAULT_SCREENING_TIME_LIMIT_SECONDS = 20 * 60;
 
 const compiledMatchGraph = new StateGraph(ScreeningStateAnnotation)
   .addNode("matchResume", matchResumeNode)
@@ -34,6 +39,7 @@ export interface MatchOutput {
   matched: boolean;
   matchScore: number;
   matchReason: string;
+  candidateSkills: string[];
   error?: string;
 }
 
@@ -42,6 +48,13 @@ export interface QuestionsInput {
   jobDescription: string;
   jobRequirements: string[];
   jobDepartment: string;
+  /** Optional HR-configured assessment settings (from AssessmentConfig). */
+  difficulty?: DifficultyLevel;
+  skills?: string[];
+  enabledQuestionTypes?: QuestionType[];
+  questionCount?: number;
+  questionCountMode?: QuestionCountMode;
+  durationMinutes?: number;
 }
 
 export interface QuestionsOutput {
@@ -57,6 +70,7 @@ export const runMatchWorkflow = traceable(
       matched: finalState.isMatch,
       matchScore: finalState.matchScore,
       matchReason: finalState.matchReason,
+      candidateSkills: finalState.candidateSkills,
       error: finalState.error,
     };
   },
@@ -66,9 +80,13 @@ export const runMatchWorkflow = traceable(
 export const runQuestionsWorkflow = traceable(
   async (input: QuestionsInput): Promise<QuestionsOutput> => {
     const finalState = await compiledQuestionsGraph.invoke(input);
+    const timeLimitSeconds =
+      input.durationMinutes && input.durationMinutes > 0
+        ? input.durationMinutes * 60
+        : DEFAULT_SCREENING_TIME_LIMIT_SECONDS;
     return {
       questions: finalState.questions,
-      timeLimitSeconds: SCREENING_TIME_LIMIT_SECONDS,
+      timeLimitSeconds,
       error: finalState.error,
     };
   },

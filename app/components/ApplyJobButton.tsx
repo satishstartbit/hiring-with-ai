@@ -1,37 +1,25 @@
-"use client";
+import Link from "next/link";
 
-import { useState } from "react";
-import ApplyModal from "./ApplyModal";
-import type { PublicApplicationQuestion } from "../jobs/[id]/JobPageClient";
-
+/**
+ * Link-based Apply button. The /jobs/<id>/apply route is gated by the proxy:
+ * guests get redirected to /login?next=..., HR users get bounced to /dashboard,
+ * and candidates land on the multi-stage apply page.
+ */
 export default function ApplyJobButton({
   jobId,
-  jobTitle,
-  applicationQuestions,
 }: Readonly<{
   jobId: string;
-  jobTitle: string;
-  applicationQuestions: PublicApplicationQuestion[];
+  // Kept in props for compatibility with existing call sites; not needed for
+  // the link itself since the apply page reads them server-side.
+  jobTitle?: string;
+  applicationQuestions?: unknown;
 }>) {
-  const [showModal, setShowModal] = useState(false);
-
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setShowModal(true)}
-        className="rounded-md bg-red-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-red-700"
-      >
-        Apply
-      </button>
-      {showModal && (
-        <ApplyModal
-          jobId={jobId}
-          jobTitle={jobTitle}
-          applicationQuestions={applicationQuestions}
-          onClose={() => setShowModal(false)}
-        />
-      )}
-    </>
+    <Link
+      href={`/jobs/${jobId}/apply`}
+      className="inline-flex items-center justify-center rounded-md bg-red-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-red-700"
+    >
+      Apply
+    </Link>
   );
 }

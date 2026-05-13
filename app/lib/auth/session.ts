@@ -8,6 +8,7 @@ const SESSION_TTL_DAYS = 7;
 
 export type SessionPayload = {
   userId: string;
+  // HR-side users always have these; candidates have empty strings.
   companyId: string;
   workspaceId: string;
   workspaceSlug: string;

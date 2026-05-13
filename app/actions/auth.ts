@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   RegisterCompanySchema,
+  RegisterCandidateSchema,
   LoginSchema,
   ForgotPasswordSchema,
   ResetPasswordSchema,
@@ -139,6 +140,13 @@ export async function registerCompany(_state: FormState, formData: FormData): Pr
   redirect("/dashboard?welcome=1");
 }
 
+function safeNextPath(raw: FormDataEntryValue | null): string | null {
+  if (typeof raw !== "string") return null;
+  // Only allow same-origin paths to prevent open-redirect.
+  if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  return raw;
+}
+
 export async function loginAction(_state: FormState, formData: FormData): Promise<FormState> {
   const parsed = LoginSchema.safeParse({
     email: formData.get("email"),
@@ -156,6 +164,25 @@ export async function loginAction(_state: FormState, formData: FormData): Promis
   if (!valid) {
     return { message: "Invalid email or password" };
   }
+
+  const next = safeNextPath(formData.get("next"));
+
+  // Candidates have no workspace / company. Skip the HR-only workspace lookup
+  // and land them on their dashboard (or the page they tried to access).
+  if (user.role === "candidate") {
+    user.lastLoginAt = new Date();
+    await user.save();
+    await createSession({
+      userId: String(user._id),
+      companyId: "",
+      workspaceId: "",
+      workspaceSlug: "",
+      role: user.role,
+      email: user.email,
+    });
+    redirect(next ?? "/candidate");
+  }
+
   const workspace = await Workspace.findOne({ _id: user.workspaceId, deletedAt: null }).lean();
   if (!workspace) {
     return { message: "Workspace unavailable. Contact support." };
@@ -170,7 +197,50 @@ export async function loginAction(_state: FormState, formData: FormData): Promis
     role: user.role,
     email: user.email,
   });
-  redirect("/dashboard");
+  redirect(next ?? "/dashboard");
+}
+
+export async function registerCandidateAction(
+  _state: FormState,
+  formData: FormData
+): Promise<FormState> {
+  const parsed = RegisterCandidateSchema.safeParse({
+    name: formData.get("name"),
+    email: formData.get("email"),
+    password: formData.get("password"),
+  });
+  if (!parsed.success) {
+    return { errors: parsed.error.flatten().fieldErrors };
+  }
+  await connectDB();
+
+  const existing = await User.findOne({ email: parsed.data.email }).lean();
+  if (existing) {
+    return { errors: { email: ["An account with this email already exists"] } };
+  }
+
+  const passwordHash = await hashPassword(parsed.data.password);
+  const user = await User.create({
+    email: parsed.data.email,
+    passwordHash,
+    name: parsed.data.name,
+    role: "candidate",
+    companyId: null,
+    workspaceId: null,
+    emailVerified: false,
+  });
+
+  await createSession({
+    userId: String(user._id),
+    companyId: "",
+    workspaceId: "",
+    workspaceSlug: "",
+    role: "candidate",
+    email: user.email,
+  });
+
+  const next = safeNextPath(formData.get("next"));
+  redirect(next ?? "/candidate");
 }
 
 export async function logoutAction(): Promise<void> {

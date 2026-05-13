@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 export default async function LandingPage() {
   const session = await optionalSession();
-  if (session) redirect("/dashboard");
+  if (session) redirect(session.role === "candidate" ? "/candidate" : "/dashboard");
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-50 text-slate-900">

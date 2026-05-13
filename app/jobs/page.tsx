@@ -31,75 +31,11 @@ export default async function JobsPage({
   const safePage = Math.min(currentPage, totalPages);
   const pagedJobs = jobs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  const activeJobs = allJobs.filter((job) => job.status === "active").length;
-  const draftJobs = allJobs.filter((job) => job.status === "draft").length;
-  const totalApplicants = allJobs.reduce((sum, job) => sum + job.applicantCount, 0);
-  const newestJob = allJobs[0];
+
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:py-8">
-      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="grid gap-0 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
-          <div className="border-b border-slate-200 p-6 sm:p-8 lg:border-b-0 lg:border-r">
-            <p className="text-sm font-semibold text-blue-700">Job Positions</p>
-            <h1 className="mt-2 max-w-3xl text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">
-              Manage every role from draft to filled
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-              Review live openings, watch applicant volume, and jump into each
-              role candidate list from one focused workspace.
-            </p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Link
-                href="/"
-                className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700"
-              >
-                Create Position
-              </Link>
-            </div>
-          </div>
 
-          <div className="bg-slate-50 p-6 sm:p-8">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-              Hiring Snapshot
-            </p>
-            <dl className="mt-5 grid grid-cols-2 gap-4">
-              <Snapshot label="Active" value={activeJobs} tone="blue" />
-              <Snapshot label="Drafts" value={draftJobs} tone="slate" />
-              <Snapshot label="Applicants" value={totalApplicants} tone="red" />
-              <Snapshot
-                label="Avg. applicants"
-                value={jobs.length ? Math.round(totalApplicants / jobs.length) : 0}
-                tone="slate"
-              />
-            </dl>
-            <div className="mt-5 rounded-md border border-slate-200 bg-white p-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                Latest role
-              </p>
-              {newestJob ? (
-                <>
-                  <p className="mt-2 truncate text-sm font-bold text-slate-950">
-                    {newestJob.title}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {new Date(newestJob.createdAt).toLocaleDateString()} /{" "}
-                    {newestJob.applicantCount} applicants
-                  </p>
-                </>
-              ) : (
-                <p className="mt-2 text-sm text-slate-500">No positions created yet.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="my-6 grid gap-4 sm:grid-cols-3">
-        <Metric label="Total positions" value={allJobs.length} color="slate" />
-        <Metric label="Active positions" value={activeJobs} color="blue" />
-        <Metric label="Total applicants" value={totalApplicants} color="red" />
-      </section>
 
       {jobs.length === 0 ? (
         <section className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">

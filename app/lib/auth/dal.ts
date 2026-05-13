@@ -28,6 +28,30 @@ export const requirePermission = cache(async (permission: Permission): Promise<S
   return session;
 });
 
+export const requireCandidate = cache(async (): Promise<SessionPayload> => {
+  const session = await verifySession();
+  if (session.role !== "candidate") {
+    // HR users get bounced back to their dashboard; the candidate area is not for them.
+    redirect("/dashboard");
+  }
+  return session;
+});
+
+export const getCurrentCandidate = cache(async () => {
+  const session = await requireCandidate();
+  await connectDB();
+  const user = await User.findOne({ _id: session.userId, deletedAt: null }).lean();
+  if (!user) redirect("/login");
+  return {
+    id: String(user._id),
+    name: user.name,
+    email: user.email,
+    avatarUrl: user.avatarUrl ?? "",
+    emailVerified: user.emailVerified,
+    createdAt: user.createdAt instanceof Date ? user.createdAt : new Date(),
+  };
+});
+
 export const getCurrentUser = cache(async () => {
   const session = await verifySession();
   await connectDB();

@@ -6,6 +6,7 @@ export const ROLES = [
   "recruiter",
   "hr_manager",
   "hiring_manager",
+  "candidate",
 ] as const;
 
 export type Role = (typeof ROLES)[number];
@@ -17,7 +18,8 @@ const UserSchema = new Schema(
     name: { type: String, required: true, trim: true },
     avatarUrl: { type: String, default: "" },
     role: { type: String, enum: ROLES, required: true, default: "recruiter" },
-    companyId: { type: Schema.Types.ObjectId, ref: "Company", required: true },
+    // Candidates have no company/workspace — these are HR-side concepts.
+    companyId: { type: Schema.Types.ObjectId, ref: "Company", default: null },
     workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", default: null },
     emailVerified: { type: Boolean, default: false },
     emailVerifyToken: { type: String, default: null },

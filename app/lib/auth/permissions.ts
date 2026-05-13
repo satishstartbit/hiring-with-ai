@@ -54,6 +54,10 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlyArray<Permission>> = {
     PERMISSIONS.CANDIDATE_REVIEW,
     PERMISSIONS.INTERVIEW_FEEDBACK,
   ],
+  // Candidates are outside the HR permission system. They authenticate only
+  // to apply, take quizzes, and complete AI interviews on their own
+  // applications — gated via requireCandidate() in the DAL, not via PERMISSIONS.
+  candidate: [],
 };
 
 export function hasPermission(role: Role, permission: Permission): boolean {
@@ -70,4 +74,5 @@ export const ROLE_LABELS: Record<Role, string> = {
   recruiter: "Recruiter",
   hr_manager: "HR Manager",
   hiring_manager: "Hiring Manager",
+  candidate: "Candidate",
 };

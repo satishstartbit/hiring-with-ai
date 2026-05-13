@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import mongoose from "mongoose";
 import { connectDB } from "../../../../lib/db/connection";
 import Job from "../../../../lib/db/models/Job";
+import AssessmentConfig from "../../../../lib/db/models/AssessmentConfig";
 import { getGroqErrorMessage } from "../../../../lib/groq";
 import { runQuestionsWorkflow } from "../../../../lib/workflow/screeningGraph";
 
@@ -31,11 +32,28 @@ export async function POST(
       );
     }
 
+    // Pick up HR's "Configure the AI assessment" settings if they've published
+    // one. Unpublished or missing configs fall back to the workflow's defaults
+    // so candidates aren't blocked on jobs that pre-date the feature.
+    const config = await AssessmentConfig.findOne({ jobId: id }).lean();
+    const configOverrides =
+      config && config.isPublished
+        ? {
+            difficulty: config.difficulty,
+            skills: config.skills,
+            enabledQuestionTypes: config.enabledQuestionTypes,
+            questionCount: config.questionCount,
+            questionCountMode: config.questionCountMode,
+            durationMinutes: config.durationMinutes,
+          }
+        : {};
+
     const result = await runQuestionsWorkflow({
       jobTitle: job.title,
       jobDescription: job.description,
       jobRequirements: job.requirements ?? [],
       jobDepartment: job.department,
+      ...configOverrides,
     });
 
     if (result.error) {

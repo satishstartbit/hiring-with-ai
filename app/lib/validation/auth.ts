@@ -29,6 +29,14 @@ export const RegisterCompanySchema = z.object({
 
 export type RegisterCompanyInput = z.infer<typeof RegisterCompanySchema>;
 
+export const RegisterCandidateSchema = z.object({
+  name: z.string().min(2, "Your name is too short").max(120).trim(),
+  email: z.email("Enter a valid email").trim().toLowerCase(),
+  password: passwordSchema,
+});
+
+export type RegisterCandidateInput = z.infer<typeof RegisterCandidateSchema>;
+
 export const LoginSchema = z.object({
   email: z.email("Enter a valid email").trim().toLowerCase(),
   password: z.string().min(1, "Password required"),

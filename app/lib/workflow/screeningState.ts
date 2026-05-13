@@ -1,4 +1,9 @@
 import { Annotation } from "@langchain/langgraph";
+import type {
+  DifficultyLevel,
+  QuestionType,
+  QuestionCountMode,
+} from "../constants/assessment";
 
 const last = <T>(a: T, b: T | undefined): T => b ?? a;
 
@@ -24,9 +29,18 @@ export const ScreeningStateAnnotation = Annotation.Root({
   candidateName: Annotation<string>({ reducer: last, default: () => "" }),
   candidateTitle: Annotation<string>({ reducer: last, default: () => "" }),
   resumeText: Annotation<string>({ reducer: last, default: () => "" }),
+  candidateSkills: Annotation<string[]>({ reducer: last, default: () => [] }),
   isMatch: Annotation<boolean>({ reducer: last, default: () => false }),
   matchScore: Annotation<number>({ reducer: last, default: () => 0 }),
   matchReason: Annotation<string>({ reducer: last, default: () => "" }),
+  // Assessment config — when an HR-published config exists these drive what
+  // the AI generates. Empty/zero values mean "fall back to defaults".
+  difficulty: Annotation<DifficultyLevel | "">({ reducer: last, default: () => "" }),
+  skills: Annotation<string[]>({ reducer: last, default: () => [] }),
+  enabledQuestionTypes: Annotation<QuestionType[]>({ reducer: last, default: () => [] }),
+  questionCount: Annotation<number>({ reducer: last, default: () => 0 }),
+  questionCountMode: Annotation<QuestionCountMode | "">({ reducer: last, default: () => "" }),
+  durationMinutes: Annotation<number>({ reducer: last, default: () => 0 }),
   questions: Annotation<ScreeningQuestion[]>({ reducer: last, default: () => [] }),
   error: Annotation<string | undefined>({ reducer: last, default: () => undefined }),
 });

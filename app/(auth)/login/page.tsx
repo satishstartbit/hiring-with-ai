@@ -32,6 +32,15 @@ export default async function LoginPage({
           Create workspace →
         </Link>
       </div>
+      <p className="mt-3 text-sm text-slate-600">
+        Applying for a job?{" "}
+        <Link
+          href={sp.next ? `/candidate-register?next=${encodeURIComponent(sp.next)}` : "/candidate-register"}
+          className="font-medium text-indigo-600 hover:text-indigo-700"
+        >
+          Create a candidate account
+        </Link>
+      </p>
     </>
   );
 }
