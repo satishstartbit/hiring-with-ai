@@ -40,7 +40,7 @@ export default async function JobsListPage() {
         </div>
         <Link
           href="/dashboard/jobs/new"
-          className="rounded-md bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-4 py-2 text-sm font-medium text-white shadow-md shadow-indigo-500/20 hover:from-indigo-500 hover:to-fuchsia-500"
+          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
         >
           + Create job
         </Link>
@@ -119,7 +119,7 @@ function EmptyState() {
       </p>
       <Link
         href="/dashboard/jobs/new"
-        className="mt-4 inline-flex rounded-md bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-4 py-2 text-sm font-medium text-white"
+        className="mt-4 inline-flex rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
       >
         + Create your first job
       </Link>

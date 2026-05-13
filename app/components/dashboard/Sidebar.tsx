@@ -26,7 +26,7 @@ export default function Sidebar({
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white px-4 py-5 lg:flex">
       <Link href="/dashboard" className="mb-6 flex items-center gap-2">
-        <span className="grid h-8 w-8 place-items-center rounded-md bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-sm font-bold text-white">
+        <span className="grid h-8 w-8 place-items-center rounded-md bg-indigo-600 text-sm font-bold text-white">
           H
         </span>
         <div className="leading-tight">

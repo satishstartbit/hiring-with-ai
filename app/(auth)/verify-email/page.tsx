@@ -18,7 +18,7 @@ export default async function VerifyEmailPage({
       <h1 className="text-2xl font-semibold tracking-tight">
         {success ? "Email verified" : "Verify your email"}
       </h1>
-      <p className="mt-2 text-sm text-slate-400">
+      <p className="mt-2 text-sm text-slate-600">
         {result
           ? result.message
           : "No token found. Open the verification link from your inbox to verify."}
@@ -26,7 +26,7 @@ export default async function VerifyEmailPage({
       <div className="mt-6">
         <Link
           href="/login"
-          className="inline-flex rounded-md bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-4 py-2 text-sm font-medium text-white hover:from-indigo-400 hover:to-fuchsia-400"
+          className="inline-flex rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
         >
           Continue to sign in →
         </Link>

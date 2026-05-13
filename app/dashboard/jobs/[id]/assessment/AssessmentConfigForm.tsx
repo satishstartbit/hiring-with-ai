@@ -677,7 +677,7 @@ export default function AssessmentConfigForm({
             type="button"
             disabled={busy}
             onClick={() => save(true)}
-            className="rounded-md bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-4 py-2 text-sm font-medium text-white shadow-md shadow-indigo-500/20 hover:from-indigo-500 hover:to-fuchsia-500 disabled:opacity-50"
+            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
           >
             {cfg.isPublished ? "Update & republish" : "Save & publish"}
           </button>

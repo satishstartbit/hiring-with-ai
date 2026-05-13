@@ -28,7 +28,7 @@ export default function UserMenu({
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm hover:bg-slate-50"
       >
-        <span className="grid h-7 w-7 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-xs font-medium text-white">
+        <span className="grid h-7 w-7 place-items-center rounded-full bg-indigo-600 text-xs font-medium text-white">
           {initials}
         </span>
         <span className="hidden text-left sm:block">

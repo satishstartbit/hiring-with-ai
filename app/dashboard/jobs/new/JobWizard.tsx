@@ -206,7 +206,7 @@ export default function JobWizard({ integrationStatus }: { integrationStatus: In
       <Stepper step={step} />
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 bg-gradient-to-br from-indigo-50 via-white to-fuchsia-50 p-5">
+        <div className="border-b border-slate-100 bg-indigo-50/40 p-5">
           <p className="text-xs uppercase tracking-wide text-slate-500">
             Step {step + 1} of {STEPS.length}
           </p>
@@ -280,7 +280,7 @@ export default function JobWizard({ integrationStatus }: { integrationStatus: In
               type="button"
               onClick={saveDraftAndGenerate}
               disabled={busy}
-              className="rounded-md bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+              className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
             >
               {busy ? "Generating with AI…" : "Generate with AI →"}
             </button>
@@ -293,7 +293,7 @@ export default function JobWizard({ integrationStatus }: { integrationStatus: In
                 setStep(4);
               }}
               disabled={busy}
-              className="rounded-md bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+              className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
             >
               Continue to publish →
             </button>
@@ -323,7 +323,7 @@ function Stepper({ step }: { step: number }) {
               i < step
                 ? "bg-emerald-500 text-white"
                 : i === step
-                ? "bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-white"
+                ? "bg-indigo-600 text-white"
                 : "bg-slate-200 text-slate-500"
             }`}
           >
@@ -686,7 +686,7 @@ function Step4Publish({
           type="button"
           onClick={publish}
           disabled={busy || selectedProviders.length === 0 || !jobId}
-          className="rounded-md bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-60"
+          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
         >
           {busy
             ? "Publishing…"

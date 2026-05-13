@@ -169,7 +169,7 @@ export default function RegisterForm() {
             placeholder="At least 8 characters"
             error={errors.password?.[0]}
           />
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-600">
             We&apos;ll create a Company Admin account for this email.
           </p>
         </fieldset>
@@ -209,7 +209,7 @@ export default function RegisterForm() {
       )}
 
       {state?.message && (
-        <p className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
           {state.message}
         </p>
       )}
@@ -219,7 +219,7 @@ export default function RegisterForm() {
           type="button"
           onClick={() => setStep((s) => Math.max(0, s - 1))}
           disabled={step === 0 || pending}
-          className="rounded-md border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/5 disabled:opacity-40"
+          className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
         >
           Back
         </button>
@@ -228,7 +228,7 @@ export default function RegisterForm() {
           <button
             type="button"
             onClick={goNext}
-            className="rounded-md bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/20"
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
           >
             Next
           </button>
@@ -236,16 +236,16 @@ export default function RegisterForm() {
           <button
             type="submit"
             disabled={pending}
-            className="rounded-md bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-5 py-2 text-sm font-medium text-white shadow-lg shadow-indigo-500/30 hover:from-indigo-400 hover:to-fuchsia-400 disabled:opacity-60"
+            className="rounded-md bg-indigo-600 px-5 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
           >
             {pending ? "Creating workspace…" : "Create workspace"}
           </button>
         )}
       </div>
 
-      <p className="text-center text-sm text-slate-400">
+      <p className="text-center text-sm text-slate-600">
         Already have an account?{" "}
-        <Link href="/login" className="text-white hover:underline">
+        <Link href="/login" className="text-indigo-600 hover:underline">
           Sign in
         </Link>
       </p>
@@ -261,14 +261,14 @@ function Stepper({ step }: { step: number }) {
           <span
             className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-medium ${
               i <= step
-                ? "bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-white"
-                : "bg-white/10 text-slate-400"
+                ? "bg-indigo-600 text-white"
+                : "bg-slate-200 text-slate-500"
             }`}
           >
             {i + 1}
           </span>
-          <span className={i <= step ? "text-slate-100" : "text-slate-500"}>{label}</span>
-          {i < STEPS.length - 1 && <span className="h-px flex-1 bg-white/10" />}
+          <span className={i <= step ? "text-slate-900" : "text-slate-500"}>{label}</span>
+          {i < STEPS.length - 1 && <span className="h-px flex-1 bg-slate-200" />}
         </li>
       ))}
     </ol>
@@ -292,15 +292,15 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium text-slate-300">{label}</label>
+      <label className="mb-1 block text-xs font-medium text-slate-700">{label}</label>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         type={type}
         placeholder={placeholder}
-        className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/30"
+        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
       />
-      {error && <p className="mt-1 text-xs text-rose-300">{error}</p>}
+      {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
     </div>
   );
 }
@@ -320,22 +320,22 @@ function SelectField({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium text-slate-300">{label}</label>
+      <label className="mb-1 block text-xs font-medium text-slate-700">{label}</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/30"
+        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
       >
-        <option value="" disabled className="bg-slate-900">
+        <option value="" disabled>
           Select…
         </option>
         {options.map((o) => (
-          <option key={o.value} value={o.value} className="bg-slate-900">
+          <option key={o.value} value={o.value}>
             {o.label}
           </option>
         ))}
       </select>
-      {error && <p className="mt-1 text-xs text-rose-300">{error}</p>}
+      {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
     </div>
   );
 }
