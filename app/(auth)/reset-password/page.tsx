@@ -11,7 +11,7 @@ export default async function ResetPasswordPage({
   return (
     <>
       <h1 className="text-2xl font-semibold tracking-tight">Set a new password</h1>
-      <p className="mt-1 text-sm text-slate-400">Choose a strong password to secure your account.</p>
+      <p className="mt-1 text-sm text-slate-600">Choose a strong password to secure your account.</p>
       <div className="mt-6">
         <ResetPasswordForm token={sp.token ?? ""} />
       </div>
