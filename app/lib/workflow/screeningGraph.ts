@@ -55,6 +55,8 @@ export interface QuestionsInput {
   questionCount?: number;
   questionCountMode?: QuestionCountMode;
   durationMinutes?: number;
+  /** Languages HR allowed for coding questions. Required when "coding" is enabled. */
+  codingLanguages?: string[];
 }
 
 export interface QuestionsOutput {

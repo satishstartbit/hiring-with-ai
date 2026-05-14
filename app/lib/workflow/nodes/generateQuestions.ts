@@ -4,15 +4,37 @@ import { z } from "zod";
 import { createLLM } from "../../groq";
 import { webSearch } from "../../tavily";
 import type { QuestionType } from "../../constants/assessment";
-import type { ScreeningQuestion, ScreeningState } from "../screeningState";
+import type {
+  ScreeningQuestion,
+  ScreeningState,
+  MCQQuestion,
+  MultiSelectQuestion,
+  DescriptiveQuestion,
+  CodingQuestion,
+} from "../screeningState";
 
 // Default fallback split (when no AssessmentConfig is present).
 const DEFAULT_TOTAL = 10;
 const DEFAULT_MCQ_COUNT = 8;
 const DEFAULT_DESC_COUNT = 2;
 
-const QuestionsSchema = z.object({
-  mcqQuestions: z
+// Per-section LLM budget. Each section is a small, focused call so it stays
+// fast and reliable on the 8B model — far better than one giant request.
+const SECTION_TIMEOUT_MS = 18000;
+
+const MCQ_SET: ReadonlySet<QuestionType> = new Set(["mcq"]);
+const MULTI_SET: ReadonlySet<QuestionType> = new Set(["multi_select"]);
+const FREE_TEXT_SET: ReadonlySet<QuestionType> = new Set([
+  "short_answer",
+  "scenario",
+  "debugging",
+  "sql",
+]);
+const CODING_SET: ReadonlySet<QuestionType> = new Set(["coding"]);
+
+// ── Per-section schemas — small and focused so the model rarely fails ──────
+const McqSectionSchema = z.object({
+  questions: z
     .array(
       z.object({
         question: z.string().min(5),
@@ -21,182 +43,185 @@ const QuestionsSchema = z.object({
       })
     )
     .default([]),
-  descriptiveQuestions: z.array(z.string().min(5)).default([]),
 });
-
-type ParsedQuestions = z.infer<typeof QuestionsSchema>;
-type ParsedMcq = ParsedQuestions["mcqQuestions"][number];
-
-const MCQ_TYPES: ReadonlySet<QuestionType> = new Set(["mcq", "multi_select"]);
-const FREE_TEXT_TYPES: ReadonlySet<QuestionType> = new Set([
-  "short_answer",
-  "scenario",
-  "debugging",
-  "coding",
-  "sql",
-]);
+const MultiSectionSchema = z.object({
+  questions: z
+    .array(
+      z.object({
+        question: z.string().min(5),
+        options: z.array(z.string().min(1)).min(4),
+        correctIndices: z.array(z.number().min(0).max(3)).min(1).max(4),
+      })
+    )
+    .default([]),
+});
+const DescriptiveSectionSchema = z.object({
+  questions: z.array(z.string().min(5)).default([]),
+});
+const CodingSectionSchema = z.object({
+  questions: z
+    .array(
+      z.object({
+        question: z.string().min(10),
+        starterCode: z.string().default(""),
+        referenceSolution: z.string().default(""),
+      })
+    )
+    .default([]),
+});
 
 interface CountPlan {
   mcqCount: number;
+  multiCount: number;
   descCount: number;
-}
-
-interface PromptContext extends CountPlan {
-  difficulty: string;
-  skills: string[];
-  enabledLabels: string;
-  strictJson?: boolean;
+  codingCount: number;
 }
 
 function normalizeQuestionText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
-
 function normalizeOptionText(option: string): string {
   return option.replace(/^[A-D][).:-]\s*/i, "").replace(/\s+/g, " ").trim();
+}
+function uniqueIndices(indices: number[]): number[] {
+  const set = new Set<number>();
+  for (const i of indices) {
+    if (Number.isFinite(i) && i >= 0 && i <= 3) set.add(Math.round(i));
+  }
+  return Array.from(set).sort((a, b) => a - b);
 }
 
 function planCounts(state: ScreeningState): CountPlan {
   const enabled = state.enabledQuestionTypes ?? [];
-  const mcqEnabled = enabled.some((t) => MCQ_TYPES.has(t));
-  const freeEnabled = enabled.some((t) => FREE_TEXT_TYPES.has(t));
 
   if (enabled.length === 0) {
-    return { mcqCount: DEFAULT_MCQ_COUNT, descCount: DEFAULT_DESC_COUNT };
+    return {
+      mcqCount: DEFAULT_MCQ_COUNT,
+      multiCount: 0,
+      descCount: DEFAULT_DESC_COUNT,
+      codingCount: 0,
+    };
   }
 
   const total =
     state.questionCount && state.questionCount > 0 ? state.questionCount : DEFAULT_TOTAL;
 
-  if (mcqEnabled && !freeEnabled) return { mcqCount: total, descCount: 0 };
-  if (!mcqEnabled && freeEnabled) return { mcqCount: 0, descCount: total };
-  if (!mcqEnabled && !freeEnabled) {
-    return { mcqCount: DEFAULT_MCQ_COUNT, descCount: DEFAULT_DESC_COUNT };
+  const hasMcq = enabled.some((t) => MCQ_SET.has(t));
+  const hasMulti = enabled.some((t) => MULTI_SET.has(t));
+  const hasFree = enabled.some((t) => FREE_TEXT_SET.has(t));
+  const hasCoding =
+    enabled.some((t) => CODING_SET.has(t)) && (state.codingLanguages ?? []).length > 0;
+
+  const buckets: { key: keyof CountPlan; weight: number }[] = [];
+  if (hasMcq) buckets.push({ key: "mcqCount", weight: 4 });
+  if (hasMulti) buckets.push({ key: "multiCount", weight: 2 });
+  if (hasFree) buckets.push({ key: "descCount", weight: 2 });
+  if (hasCoding) buckets.push({ key: "codingCount", weight: 1 });
+
+  if (buckets.length === 0) {
+    return {
+      mcqCount: DEFAULT_MCQ_COUNT,
+      multiCount: 0,
+      descCount: DEFAULT_DESC_COUNT,
+      codingCount: 0,
+    };
   }
 
-  const descCount = Math.max(1, Math.round(total * 0.2));
-  const mcqCount = Math.max(1, total - descCount);
-  return { mcqCount, descCount };
+  const plan: CountPlan = { mcqCount: 0, multiCount: 0, descCount: 0, codingCount: 0 };
+  const totalWeight = buckets.reduce((s, b) => s + b.weight, 0);
+  let remaining = total;
+  for (let i = 0; i < buckets.length; i++) {
+    const b = buckets[i];
+    if (i === buckets.length - 1) {
+      plan[b.key] = remaining;
+    } else {
+      const share = Math.max(1, Math.round((total * b.weight) / totalWeight));
+      plan[b.key] = Math.min(share, remaining - (buckets.length - 1 - i));
+      remaining -= plan[b.key];
+    }
+  }
+
+  // Coding is expensive for the candidate — cap it unless it's the only type.
+  if (plan.codingCount > 2 && buckets.length > 1) {
+    const overflow = plan.codingCount - 2;
+    plan.codingCount = 2;
+    if (plan.mcqCount > 0) plan.mcqCount += overflow;
+    else if (plan.descCount > 0) plan.descCount += overflow;
+    else if (plan.multiCount > 0) plan.multiCount += overflow;
+  }
+
+  return plan;
 }
 
 function difficultyGuidance(difficulty: string): string {
-  if (difficulty === "easy") {
-    return "Foundational concepts. Suitable for entry-level screening.";
-  }
-  if (difficulty === "hard") {
+  if (difficulty === "easy") return "Foundational concepts. Suitable for entry-level screening.";
+  if (difficulty === "hard")
     return "Senior-level depth: architecture, optimisation, edge cases, trade-offs.";
-  }
-  if (difficulty === "adaptive") {
-    return "Mix difficulty: 30% easy, 50% medium, 20% hard.";
-  }
+  if (difficulty === "adaptive") return "Mix difficulty: 30% easy, 50% medium, 20% hard.";
   return "Mid-level depth, balanced across the listed skills.";
 }
 
-function buildSystemPrompt(ctx: PromptContext): string {
-  const { mcqCount, descCount, difficulty, skills, enabledLabels, strictJson } = ctx;
-  const lines: string[] = [];
-
-  if (mcqCount > 0 && descCount > 0) {
-    lines.push(
-      `Generate exactly ${mcqCount} multiple-choice questions and ${descCount} open-ended descriptive questions for this job role.`
-    );
-  } else if (mcqCount > 0) {
-    lines.push(
-      `Generate exactly ${mcqCount} multiple-choice questions for this job role. Do NOT generate any descriptive questions.`
-    );
-  } else {
-    lines.push(
-      `Generate exactly ${descCount} open-ended descriptive questions for this job role. Do NOT generate any multiple-choice questions.`
-    );
-  }
-
-  lines.push("", `Difficulty: ${difficulty}.`, difficultyGuidance(difficulty));
-
-  if (skills.length > 0) {
-    lines.push(
-      "",
-      "Skills to test:",
-      `- ${skills.join("\n- ")}`,
-      "Distribute questions across the listed skills."
-    );
-  }
-
-  if (enabledLabels) {
-    lines.push(
-      "",
-      `Enabled question formats: ${enabledLabels}.`,
-      "Multi-select formats must still be rendered as a single-correct MCQ.",
-      "Coding/SQL/debugging formats must be phrased as written-answer prompts."
-    );
-  }
-
-  if (mcqCount > 0) {
-    lines.push(
-      "",
-      `MCQ rules (${mcqCount} questions):`,
-      "- Each MCQ has exactly 4 options.",
-      "- Exactly one option is correct.",
-      "- correctIndex must be 0, 1, 2, or 3.",
-      "- Keep all options concise and distinct."
-    );
-  }
-
-  if (descCount > 0) {
-    lines.push(
-      "",
-      `Descriptive rules (${descCount} questions):`,
-      "- Each question must require a thoughtful written answer.",
-      '- Each question must be a single sentence ending with "?".'
-    );
-  }
-
-  lines.push(
-    "",
-    "Return only structured data for the schema requested.",
-    strictJson
-      ? "Do not add explanations, notes, or markdown before or after the structured result."
-      : ""
-  );
-
-  return lines.join("\n");
+interface SectionPromptCtx {
+  state: ScreeningState;
+  skills: string[];
+  difficulty: string;
+  searchSection: string;
 }
 
-function buildUserPrompt(state: ScreeningState, skills: string[], searchSection: string): string {
+function jobContextBlock(ctx: SectionPromptCtx): string {
+  const { state, skills } = ctx;
   return [
     `Job title: ${state.jobTitle}`,
     `Department: ${state.jobDepartment}`,
     `Requirements: ${state.jobRequirements.join(", ")}`,
-    skills.length > 0 ? `Configured skills: ${skills.join(", ")}` : "",
-    `Job description: ${state.jobDescription.slice(0, 2000)}`,
-    searchSection,
+    skills.length > 0 ? `Skills to test: ${skills.join(", ")}` : "",
+    `Job description: ${state.jobDescription.slice(0, 1500)}`,
+    ctx.searchSection,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-function normalizeMcq(raw: ParsedMcq) {
+function commonSystemHeader(ctx: SectionPromptCtx): string[] {
+  const lines = [`Difficulty: ${ctx.difficulty}.`, difficultyGuidance(ctx.difficulty)];
+  if (ctx.skills.length > 0) {
+    lines.push(`Distribute questions across these skills: ${ctx.skills.join(", ")}.`);
+  }
+  return lines;
+}
+
+// ── Normalizers / validators ──────────────────────────────────────────────
+function normalizeMcq(raw: { question: string; options: string[]; correctIndex: number }) {
   return {
     question: normalizeQuestionText(raw.question),
     options: raw.options.map(normalizeOptionText).filter(Boolean),
     correctIndex: Math.min(Math.max(Math.round(raw.correctIndex), 0), 3),
   };
 }
-
 function isValidMcq(mcq: ReturnType<typeof normalizeMcq>): boolean {
   if (mcq.question.length === 0 || mcq.options.length < 4) return false;
-  const distinct = new Set(mcq.options.slice(0, 4).map((option) => option.toLowerCase()));
+  const distinct = new Set(mcq.options.slice(0, 4).map((o) => o.toLowerCase()));
+  return distinct.size === 4;
+}
+function normalizeMulti(raw: { question: string; options: string[]; correctIndices: number[] }) {
+  const options = raw.options.map(normalizeOptionText).filter(Boolean);
+  return {
+    question: normalizeQuestionText(raw.question),
+    options,
+    correctIndices: uniqueIndices(raw.correctIndices).filter((i) => i < options.length),
+  };
+}
+function isValidMulti(multi: ReturnType<typeof normalizeMulti>): boolean {
+  if (multi.question.length === 0 || multi.options.length < 4) return false;
+  if (multi.correctIndices.length === 0) return false;
+  const distinct = new Set(multi.options.slice(0, 4).map((o) => o.toLowerCase()));
   return distinct.size === 4;
 }
 
-function collectMcqs(raw: ParsedMcq[], mcqCount: number) {
-  if (mcqCount <= 0) return [];
-  return raw.map(normalizeMcq).filter(isValidMcq).slice(0, mcqCount);
-}
-
+// ── Fallback topic helpers ────────────────────────────────────────────────
 function conciseTopic(text: string): string {
   return text.replace(/\s+/g, " ").trim().replace(/[.:;,]+$/g, "").slice(0, 80);
 }
-
 function uniqueItems(items: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -210,15 +235,12 @@ function uniqueItems(items: string[]): string[] {
   }
   return out;
 }
-
 function fallbackTopics(state: ScreeningState, skills: string[], needed: number): string[] {
   const explicit = uniqueItems(skills);
   if (explicit.length >= needed) return explicit.slice(0, needed);
-
   const requirements = uniqueItems(state.jobRequirements);
   const merged = uniqueItems([...explicit, ...requirements]);
   if (merged.length > 0) return merged;
-
   return uniqueItems([
     state.jobTitle,
     state.jobDepartment ? `${state.jobDepartment} responsibilities` : "",
@@ -227,15 +249,16 @@ function fallbackTopics(state: ScreeningState, skills: string[], needed: number)
     "quality and testing",
   ]).slice(0, Math.max(needed, 3));
 }
-
 function rotateOptions(options: string[], shift: number): { options: string[]; correctIndex: number } {
   const normalizedShift = shift % options.length;
   const rotated = options.slice(normalizedShift).concat(options.slice(0, normalizedShift));
-  const correctIndex = options.length - normalizedShift === options.length ? 0 : options.length - normalizedShift;
+  const correctIndex =
+    options.length - normalizedShift === options.length ? 0 : options.length - normalizedShift;
   return { options: rotated, correctIndex };
 }
 
-function buildFallbackMcq(topic: string, index: number): ScreeningQuestion {
+// ── Deterministic fallback builders (used per-section on LLM failure) ──────
+function buildFallbackMcq(topic: string, index: number): MCQQuestion {
   const templates = [
     {
       question: `When working with ${topic}, which approach is the safest starting point for a production change?`,
@@ -274,10 +297,8 @@ function buildFallbackMcq(topic: string, index: number): ScreeningQuestion {
       ],
     },
   ];
-
   const template = templates[index % templates.length];
   const rotated = rotateOptions(template.options, index % 4);
-
   return {
     type: "mcq",
     text: template.question,
@@ -285,84 +306,276 @@ function buildFallbackMcq(topic: string, index: number): ScreeningQuestion {
     correctIndex: rotated.correctIndex,
   };
 }
-
-function buildFallbackDescriptive(topic: string, index: number): ScreeningQuestion {
+function buildFallbackMulti(topic: string, index: number): MultiSelectQuestion {
+  const templates = [
+    {
+      question: `Which of the following are sound practices when working with ${topic}? (Select all that apply)`,
+      options: [
+        "Cover the critical paths with automated tests",
+        "Skip code review for small changes",
+        "Document non-obvious decisions and constraints",
+        "Add observability around new behavior",
+      ],
+      correct: [0, 2, 3],
+    },
+    {
+      question: `When designing a feature involving ${topic}, which trade-offs are worth weighing? (Select all that apply)`,
+      options: [
+        "Latency vs. cost",
+        "Always pick the most familiar tool regardless of fit",
+        "Maintainability vs. development speed",
+        "Reliability vs. complexity",
+      ],
+      correct: [0, 2, 3],
+    },
+  ];
+  const t = templates[index % templates.length];
+  return {
+    type: "multi_select",
+    text: t.question,
+    options: t.options as [string, string, string, string],
+    correctIndices: t.correct,
+  };
+}
+function buildFallbackDescriptive(topic: string, index: number): DescriptiveQuestion {
   const templates = [
     `Describe a project where you used ${topic} to solve a real problem. What was your approach and outcome?`,
     `How would you plan, test, and safely deliver a change related to ${topic} for this role?`,
     `What trade-offs would you consider when making an important decision involving ${topic}?`,
     `If you inherited a weak implementation related to ${topic}, how would you improve it step by step?`,
   ];
-
+  return { type: "descriptive", text: templates[index % templates.length] };
+}
+function starterCodeFor(language: string, fnName: string, arg: string): string {
+  switch (language) {
+    case "python":
+      return `def ${fnName}(${arg}):\n    # TODO: implement\n    pass\n`;
+    case "java":
+      return `public class Solution {\n    public static Object ${fnName}(Object ${arg}) {\n        // TODO: implement\n        return null;\n    }\n}\n`;
+    case "cpp":
+      return `#include <iostream>\n#include <vector>\n\n// TODO: implement ${fnName}\n\nint main() {\n    return 0;\n}\n`;
+    case "sql":
+      return `-- Write a query for the problem above.\nSELECT 1;\n`;
+    case "typescript":
+      return `export function ${fnName}(${arg}: unknown): unknown {\n  // TODO: implement\n  return null;\n}\n`;
+    default:
+      return `function ${fnName}(${arg}) {\n  // TODO: implement\n  return null;\n}\n`;
+  }
+}
+function refSolutionFor(language: string, fnName: string): string {
+  if (language === "python") {
+    if (fnName === "sumOfEvens") return `def sumOfEvens(arr):\n    return sum(x for x in arr if x % 2 == 0)\n`;
+    return `def reverseString(s):\n    return s[::-1]\n`;
+  }
+  if (fnName === "sumOfEvens") {
+    return `function sumOfEvens(arr){ return arr.filter(x => x % 2 === 0).reduce((a,b)=>a+b, 0); }\n`;
+  }
+  return `function reverseString(s){ let r=''; for (let i=s.length-1;i>=0;i--) r+=s[i]; return r; }\n`;
+}
+function buildFallbackCoding(topic: string, language: string, index: number): CodingQuestion {
+  const problems = [
+    {
+      question: `Write a function that takes an array of integers and returns the sum of all even numbers. Example: input [1, 2, 3, 4, 5] returns 6. Use ${language}.`,
+      starter: starterCodeFor(language, "sumOfEvens", "arr"),
+      ref: refSolutionFor(language, "sumOfEvens"),
+    },
+    {
+      question: `Write a function that reverses a string without using built-in reverse helpers. Example: input "hello" returns "olleh". Use ${language}.`,
+      starter: starterCodeFor(language, "reverseString", "s"),
+      ref: refSolutionFor(language, "reverseString"),
+    },
+  ];
+  const p = problems[index % problems.length];
   return {
-    type: "descriptive",
-    text: templates[index % templates.length],
+    type: "coding",
+    text: `${p.question} (Context: ${topic})`,
+    language,
+    starterCode: p.starter,
+    referenceSolution: p.ref,
   };
 }
 
-function buildFallbackQuestions(
-  state: ScreeningState,
-  plan: CountPlan,
-  skills: string[]
-): ScreeningQuestion[] {
-  const topics = fallbackTopics(state, skills, Math.max(plan.mcqCount, plan.descCount, 4));
-  const questions: ScreeningQuestion[] = [];
-
-  for (let i = 0; i < plan.mcqCount; i++) {
-    questions.push(buildFallbackMcq(topics[i % topics.length] || state.jobTitle, i));
+// ── Per-section generators — each is one small, focused LLM call ───────────
+async function generateMcqSection(
+  ctx: SectionPromptCtx,
+  count: number
+): Promise<MCQQuestion[]> {
+  const topics = fallbackTopics(ctx.state, ctx.skills, Math.max(count, 4));
+  if (count <= 0) return [];
+  try {
+    const llm = createLLM({ maxTokens: 1600, timeout: SECTION_TIMEOUT_MS });
+    const structured = llm.withStructuredOutput(McqSectionSchema, { name: "McqSection" });
+    const system = [
+      `Generate exactly ${count} single-correct multiple-choice questions for this job role.`,
+      ...commonSystemHeader(ctx),
+      "Rules: each MCQ has exactly 4 distinct options; exactly one is correct; correctIndex is 0-3.",
+      "Return only structured data.",
+    ].join("\n");
+    const raw = await structured.invoke([
+      new SystemMessage(system),
+      new HumanMessage(jobContextBlock(ctx)),
+    ]);
+    const parsed = McqSectionSchema.parse(raw);
+    const valid = parsed.questions
+      .map(normalizeMcq)
+      .filter(isValidMcq)
+      .slice(0, count)
+      .map(
+        (q): MCQQuestion => ({
+          type: "mcq",
+          text: q.question,
+          options: q.options.slice(0, 4) as [string, string, string, string],
+          correctIndex: q.correctIndex,
+        })
+      );
+    // Top up with deterministic questions if the model returned too few.
+    while (valid.length < count) {
+      valid.push(buildFallbackMcq(topics[valid.length % topics.length], valid.length));
+    }
+    return valid;
+  } catch (err) {
+    console.error("[generateQuestions] mcq section failed — using fallback:", err);
+    return Array.from({ length: count }, (_, i) =>
+      buildFallbackMcq(topics[i % topics.length], i)
+    );
   }
-
-  for (let i = 0; i < plan.descCount; i++) {
-    questions.push(buildFallbackDescriptive(topics[i % topics.length] || state.jobTitle, i));
-  }
-
-  return questions;
 }
 
-async function generateQuestionsAttempt(
-  state: ScreeningState,
-  plan: CountPlan,
-  skills: string[],
-  difficulty: string,
-  enabledLabels: string,
-  searchSection: string,
-  strictJson = false
-): Promise<ParsedQuestions> {
-  const llm = createLLM({ maxTokens: 2200, timeout: 15000 });
-  const structured = llm.withStructuredOutput(QuestionsSchema, { name: "GeneratedQuestions" });
-
-  const result = await structured.invoke([
-    new SystemMessage(
-      buildSystemPrompt({ ...plan, difficulty, skills, enabledLabels, strictJson })
-    ),
-    new HumanMessage(buildUserPrompt(state, skills, searchSection)),
-  ]);
-
-  return QuestionsSchema.parse(result);
+async function generateMultiSection(
+  ctx: SectionPromptCtx,
+  count: number
+): Promise<MultiSelectQuestion[]> {
+  const topics = fallbackTopics(ctx.state, ctx.skills, Math.max(count, 4));
+  if (count <= 0) return [];
+  try {
+    const llm = createLLM({ maxTokens: 1600, timeout: SECTION_TIMEOUT_MS });
+    const structured = llm.withStructuredOutput(MultiSectionSchema, { name: "MultiSection" });
+    const system = [
+      `Generate exactly ${count} multi-select questions for this job role.`,
+      ...commonSystemHeader(ctx),
+      "Rules: each has exactly 4 distinct options; 1-4 options can be correct (usually 2-3);",
+      "correctIndices is an array of unique 0-based indices.",
+      "Return only structured data.",
+    ].join("\n");
+    const raw = await structured.invoke([
+      new SystemMessage(system),
+      new HumanMessage(jobContextBlock(ctx)),
+    ]);
+    const parsed = MultiSectionSchema.parse(raw);
+    const valid = parsed.questions
+      .map(normalizeMulti)
+      .filter(isValidMulti)
+      .slice(0, count)
+      .map(
+        (q): MultiSelectQuestion => ({
+          type: "multi_select",
+          text: q.question,
+          options: q.options.slice(0, 4) as [string, string, string, string],
+          correctIndices: q.correctIndices,
+        })
+      );
+    while (valid.length < count) {
+      valid.push(buildFallbackMulti(topics[valid.length % topics.length], valid.length));
+    }
+    return valid;
+  } catch (err) {
+    console.error("[generateQuestions] multi-select section failed — using fallback:", err);
+    return Array.from({ length: count }, (_, i) =>
+      buildFallbackMulti(topics[i % topics.length], i)
+    );
+  }
 }
 
-function questionsFromParsed(parsed: ParsedQuestions, plan: CountPlan): ScreeningQuestion[] | null {
-  if (plan.descCount > 0 && parsed.descriptiveQuestions.length < plan.descCount) return null;
+async function generateDescriptiveSection(
+  ctx: SectionPromptCtx,
+  count: number
+): Promise<DescriptiveQuestion[]> {
+  const topics = fallbackTopics(ctx.state, ctx.skills, Math.max(count, 4));
+  if (count <= 0) return [];
+  try {
+    const llm = createLLM({ maxTokens: 1000, timeout: SECTION_TIMEOUT_MS });
+    const structured = llm.withStructuredOutput(DescriptiveSectionSchema, {
+      name: "DescriptiveSection",
+    });
+    const system = [
+      `Generate exactly ${count} open-ended descriptive questions for this job role.`,
+      ...commonSystemHeader(ctx),
+      'Rules: each question requires a thoughtful written answer and is a single sentence ending with "?".',
+      "Return only structured data.",
+    ].join("\n");
+    const raw = await structured.invoke([
+      new SystemMessage(system),
+      new HumanMessage(jobContextBlock(ctx)),
+    ]);
+    const parsed = DescriptiveSectionSchema.parse(raw);
+    const valid = parsed.questions
+      .map(normalizeQuestionText)
+      .filter((t) => t.length >= 5)
+      .slice(0, count)
+      .map((text): DescriptiveQuestion => ({ type: "descriptive", text }));
+    while (valid.length < count) {
+      valid.push(buildFallbackDescriptive(topics[valid.length % topics.length], valid.length));
+    }
+    return valid;
+  } catch (err) {
+    console.error("[generateQuestions] descriptive section failed — using fallback:", err);
+    return Array.from({ length: count }, (_, i) =>
+      buildFallbackDescriptive(topics[i % topics.length], i)
+    );
+  }
+}
 
-  const validMcq = collectMcqs(parsed.mcqQuestions, plan.mcqCount);
-  if (plan.mcqCount > 0 && validMcq.length < plan.mcqCount) return null;
+async function generateCodingSection(
+  ctx: SectionPromptCtx,
+  count: number,
+  language: string
+): Promise<CodingQuestion[]> {
+  const topics = fallbackTopics(ctx.state, ctx.skills, Math.max(count, 4));
+  if (count <= 0) return [];
+  try {
+    const llm = createLLM({ maxTokens: 2000, timeout: SECTION_TIMEOUT_MS });
+    const structured = llm.withStructuredOutput(CodingSectionSchema, { name: "CodingSection" });
+    const system = [
+      `Generate exactly ${count} coding problems in ${language} for this job role.`,
+      ...commonSystemHeader(ctx),
+      "For each: 'question' is the full problem statement (requirements, input, expected output, an example).",
+      `'starterCode' is a short ${language} skeleton (~10 lines). 'referenceSolution' is a correct concise ${language} solution (~30 lines), kept hidden from the candidate.`,
+      "Return only structured data.",
+    ].join("\n");
+    const raw = await structured.invoke([
+      new SystemMessage(system),
+      new HumanMessage(jobContextBlock(ctx)),
+    ]);
+    const parsed = CodingSectionSchema.parse(raw);
+    const valid = parsed.questions
+      .filter((c) => normalizeQuestionText(c.question).length >= 10)
+      .slice(0, count)
+      .map(
+        (c): CodingQuestion => ({
+          type: "coding",
+          text: normalizeQuestionText(c.question),
+          language,
+          starterCode: c.starterCode || starterCodeFor(language, "solve", "input"),
+          referenceSolution: c.referenceSolution || "",
+        })
+      );
+    while (valid.length < count) {
+      valid.push(buildFallbackCoding(topics[valid.length % topics.length], language, valid.length));
+    }
+    return valid;
+  } catch (err) {
+    console.error("[generateQuestions] coding section failed — using fallback:", err);
+    return Array.from({ length: count }, (_, i) =>
+      buildFallbackCoding(topics[i % topics.length], language, i)
+    );
+  }
+}
 
-  return [
-    ...validMcq.map(
-      (question): ScreeningQuestion => ({
-        type: "mcq",
-        text: question.question,
-        options: question.options.slice(0, 4) as [string, string, string, string],
-        correctIndex: question.correctIndex,
-      })
-    ),
-    ...parsed.descriptiveQuestions.slice(0, plan.descCount).map(
-      (question): ScreeningQuestion => ({
-        type: "descriptive",
-        text: normalizeQuestionText(question),
-      })
-    ),
-  ];
+function pickCodingLanguage(allowed: string[]): string {
+  if (allowed.length === 0) return "javascript";
+  const preferred = ["javascript", "python", "typescript"];
+  for (const p of preferred) if (allowed.includes(p)) return p;
+  return allowed[0];
 }
 
 export const generateQuestionsNode = traceable(
@@ -370,10 +583,11 @@ export const generateQuestionsNode = traceable(
     const plan = planCounts(state);
     const skills = state.skills ?? [];
     const difficulty = state.difficulty || "medium";
-    const enabledLabels = (state.enabledQuestionTypes ?? [])
-      .filter((t) => t !== "video" && t !== "voice")
-      .join(", ");
+    const codingLanguage = pickCodingLanguage(state.codingLanguages ?? []);
 
+    // One web search up front, shared by every section. It's hard-capped at
+    // 8s in tavily.ts and degrades to "" on failure, so it can't stall us.
+    let searchSection = "";
     try {
       const topicHint =
         skills.length > 0
@@ -383,48 +597,27 @@ export const generateQuestionsNode = traceable(
         `${topicHint} ${difficulty} technical interview questions`,
         3
       );
-      const searchSection = searchContext
-        ? `\n\nWeb context (use as inspiration for realistic questions):\n${searchContext}`
-        : "";
-
-      try {
-        const parsed = await generateQuestionsAttempt(
-          state,
-          plan,
-          skills,
-          difficulty,
-          enabledLabels,
-          searchSection
-        );
-        const questions = questionsFromParsed(parsed, plan);
-        if (questions) return { questions };
-      } catch (err) {
-        console.error("[generateQuestions] structured attempt failed:", err);
+      if (searchContext) {
+        searchSection = `\n\nWeb context (use as inspiration only):\n${searchContext}`;
       }
-
-      try {
-        const parsed = await generateQuestionsAttempt(
-          state,
-          plan,
-          skills,
-          difficulty,
-          enabledLabels,
-          "",
-          true
-        );
-        const questions = questionsFromParsed(parsed, plan);
-        if (questions) return { questions };
-      } catch (err) {
-        console.error("[generateQuestions] strict retry failed:", err);
-      }
-
-      // Final safety net: generate a deterministic quiz locally so the
-      // candidate is never blocked by malformed AI output.
-      return { questions: buildFallbackQuestions(state, plan, skills) };
-    } catch (err) {
-      console.error("[generateQuestions] falling back after error:", err);
-      return { questions: buildFallbackQuestions(state, plan, skills) };
+    } catch {
+      // search is optional — continue without it
     }
+
+    const ctx: SectionPromptCtx = { state, skills, difficulty, searchSection };
+
+    // Each section is an independent, small LLM call. Running them in parallel
+    // means total latency ≈ the slowest section, not the sum — and any one
+    // section failing only falls back that section, not the whole quiz.
+    const [mcq, multi, desc, coding] = await Promise.all([
+      generateMcqSection(ctx, plan.mcqCount),
+      generateMultiSection(ctx, plan.multiCount),
+      generateDescriptiveSection(ctx, plan.descCount),
+      generateCodingSection(ctx, plan.codingCount, codingLanguage),
+    ]);
+
+    const questions: ScreeningQuestion[] = [...mcq, ...multi, ...desc, ...coding];
+    return { questions };
   },
   { name: "generate_questions", run_type: "chain", tags: ["screening"] }
 ) as (state: ScreeningState) => Promise<Partial<ScreeningState>>;

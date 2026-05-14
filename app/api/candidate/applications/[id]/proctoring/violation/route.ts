@@ -66,10 +66,17 @@ export async function POST(
     return Response.json({ error: "Quiz is not active" }, { status: 400 });
   }
 
-  candidate.proctoringViolations = candidate.proctoringViolations ?? [];
-  candidate.proctoringViolations.push({ type, level, at: new Date() });
+  // Camera permission denied or device disconnected isn't a proctoring
+  // violation — it's an environment problem. We record it for diagnostics but
+  // never force-close the quiz, so the candidate can fix the camera and come
+  // back to retake the same question set.
+  const isCameraIssue = type === "camera_denied" || type === "camera_lost";
+  const effectiveLevel = isCameraIssue ? "warning" : level;
 
-  if (level === "terminate") {
+  candidate.proctoringViolations = candidate.proctoringViolations ?? [];
+  candidate.proctoringViolations.push({ type, level: effectiveLevel, at: new Date() });
+
+  if (effectiveLevel === "terminate") {
     // Force-close the quiz. Save whatever answers the client managed to send,
     // mark the application as flagged, and skip AI grading — the recruiter
     // will review the answers and proctoring snapshots manually.
@@ -100,5 +107,6 @@ export async function POST(
     ok: true,
     flagged: candidate.proctoringFlagged ?? false,
     stage: candidate.stage,
+    cameraIssue: isCameraIssue,
   });
 }

@@ -14,12 +14,32 @@ export interface MCQQuestion {
   correctIndex: number; // 0-based index of the correct option
 }
 
+export interface MultiSelectQuestion {
+  type: "multi_select";
+  text: string;
+  options: [string, string, string, string];
+  /** Indices of all correct options. At least one, can be up to all four. */
+  correctIndices: number[];
+}
+
 export interface DescriptiveQuestion {
   type: "descriptive";
   text: string;
 }
 
-export type ScreeningQuestion = MCQQuestion | DescriptiveQuestion;
+export interface CodingQuestion {
+  type: "coding";
+  text: string;
+  language: string;
+  starterCode: string;
+  referenceSolution: string;
+}
+
+export type ScreeningQuestion =
+  | MCQQuestion
+  | MultiSelectQuestion
+  | DescriptiveQuestion
+  | CodingQuestion;
 
 export const ScreeningStateAnnotation = Annotation.Root({
   jobTitle: Annotation<string>({ reducer: last, default: () => "" }),
@@ -41,6 +61,8 @@ export const ScreeningStateAnnotation = Annotation.Root({
   questionCount: Annotation<number>({ reducer: last, default: () => 0 }),
   questionCountMode: Annotation<QuestionCountMode | "">({ reducer: last, default: () => "" }),
   durationMinutes: Annotation<number>({ reducer: last, default: () => 0 }),
+  /** Languages the HR config allows for coding questions. Empty = no coding generated. */
+  codingLanguages: Annotation<string[]>({ reducer: last, default: () => [] }),
   questions: Annotation<ScreeningQuestion[]>({ reducer: last, default: () => [] }),
   error: Annotation<string | undefined>({ reducer: last, default: () => undefined }),
 });

@@ -5,6 +5,8 @@ import { requireCandidate } from "@/app/lib/auth/dal";
 import { connectDB } from "@/app/lib/db/connection";
 import Candidate, { type CandidateStage } from "@/app/lib/db/models/Candidate";
 import InterviewSession from "@/app/lib/db/models/InterviewSession";
+import AssessmentConfig from "@/app/lib/db/models/AssessmentConfig";
+import type { QuestionType } from "@/app/lib/constants/assessment";
 
 export const dynamic = "force-dynamic";
 
@@ -112,6 +114,10 @@ export default async function CandidateApplicationPage({
         .lean()
     : null;
 
+  const assessmentConfig = await AssessmentConfig.findOne({ jobId: app.jobId })
+    .select("difficulty enabledQuestionTypes durationMinutes questionCount passingCriteria isPublished")
+    .lean();
+
   const view = describeStage(app.stage as CandidateStage, id);
   const stage = app.stage as CandidateStage;
 
@@ -213,28 +219,18 @@ export default async function CandidateApplicationPage({
         </ScoreSection>
       )}
 
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          How scoring works
-        </h3>
-        <ul className="mt-3 space-y-2 text-sm text-slate-600">
-          <li>
-            <span className="font-medium text-slate-800">Resume fit (0–100):</span> AI compares
-            your resume against the role’s requirements. 60 or higher means you proceed to the
-            screening quiz.
-          </li>
-          <li>
-            <span className="font-medium text-slate-800">Screening quiz (0–100):</span> Each
-            question is worth up to 10 points. MCQs are graded automatically; written answers are
-            reviewed by AI on relevance, depth, and accuracy.
-          </li>
-          <li>
-            <span className="font-medium text-slate-800">AI interview (0–100):</span> The AI
-            evaluates each spoken/typed answer against the role and produces a per-question score
-            plus an overall summary you can read above once it’s done.
-          </li>
-        </ul>
-      </section>
+      <ScoringInfo
+        config={
+          assessmentConfig && assessmentConfig.isPublished
+            ? {
+                enabledTypes: assessmentConfig.enabledQuestionTypes ?? [],
+                durationMinutes: assessmentConfig.durationMinutes ?? 20,
+                questionCount: assessmentConfig.questionCount ?? 10,
+                passingPercent: assessmentConfig.passingCriteria?.overallPercent ?? 60,
+              }
+            : null
+        }
+      />
     </div>
   );
 }
@@ -331,6 +327,88 @@ function ScoreSection({
       {meta && <p className="mt-3 text-xs text-slate-500">{meta}</p>}
       {feedback && <p className="mt-3 text-sm leading-6 text-slate-700">{feedback}</p>}
       {children}
+    </section>
+  );
+}
+
+const TYPE_LABEL: Record<QuestionType, string> = {
+  mcq: "single-correct MCQs",
+  multi_select: "multi-select questions",
+  coding: "coding problems",
+  short_answer: "short written answers",
+  scenario: "scenario questions",
+  debugging: "debugging exercises",
+  sql: "SQL queries",
+  video: "video responses",
+  voice: "voice responses",
+};
+
+function joinList(items: string[]): string {
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+function ScoringInfo({
+  config,
+}: Readonly<{
+  config: {
+    enabledTypes: string[];
+    durationMinutes: number;
+    questionCount: number;
+    passingPercent: number;
+  } | null;
+}>) {
+  const types = config?.enabledTypes ?? [];
+  const typeLabels = types
+    .map((t) => TYPE_LABEL[t as QuestionType] ?? t)
+    .filter((s, i, arr) => arr.indexOf(s) === i);
+  const hasMcq = types.includes("mcq");
+  const hasMulti = types.includes("multi_select");
+  const hasCoding = types.includes("coding");
+  const hasFree =
+    types.includes("short_answer") ||
+    types.includes("scenario") ||
+    types.includes("debugging") ||
+    types.includes("sql");
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+        How scoring works
+      </h3>
+      <ul className="mt-3 space-y-2 text-sm text-slate-600">
+        <li>
+          <span className="font-medium text-slate-800">Resume fit (0–100):</span> AI compares your
+          resume against the role’s requirements. 60 or higher means you proceed to the screening
+          quiz.
+        </li>
+        {config ? (
+          <li>
+            <span className="font-medium text-slate-800">Screening quiz (0–100):</span> ~
+            {config.questionCount} questions ({typeLabels.length > 0 ? joinList(typeLabels) : "mixed formats"})
+            in {config.durationMinutes} minutes. Each question is worth up to 10 points.
+            {hasMcq && " MCQs are graded automatically."}
+            {hasMulti && " Multi-select awards full credit only when you pick exactly the right set."}
+            {hasFree && " Written answers are reviewed by AI on relevance, depth, and accuracy."}
+            {hasCoding && " Coding submissions are AI-graded on correctness and quality against a hidden reference solution."}
+            {config.passingPercent > 0 && (
+              <> You need at least <strong>{config.passingPercent}/100</strong> to move on to the AI interview.</>
+            )}
+          </li>
+        ) : (
+          <li>
+            <span className="font-medium text-slate-800">Screening quiz (0–100):</span> AI-generated
+            questions tailored to the role. Each question is worth up to 10 points.
+          </li>
+        )}
+        <li>
+          <span className="font-medium text-slate-800">AI interview (0–100):</span> The AI evaluates
+          each spoken/typed answer against the role and produces a per-question score plus an
+          overall summary you can read above once it’s done.
+        </li>
+      </ul>
     </section>
   );
 }

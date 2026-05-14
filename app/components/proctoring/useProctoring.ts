@@ -11,7 +11,9 @@ export type ProctoringViolation =
   | "window_blur"
   | "multi_face"
   | "no_face"
-  | "voice_detected";
+  | "voice_detected"
+  | "fullscreen_exit"
+  | "copy_paste";
 
 export type ProctoringStatus = "idle" | "requesting" | "ready" | "terminated";
 
@@ -47,8 +49,18 @@ const SNAPSHOT_WIDTH = 320;
 const SNAPSHOT_HEIGHT = 240;
 const SNAPSHOT_JPEG_QUALITY = 0.55;
 
+export interface ProctoringConfig {
+  /** Detect tab switch / window blur. Camera + face/voice detection are always on. */
+  tabSwitchDetection: boolean;
+  /** Block copy/paste/cut/context-menu; emit a copy_paste violation on attempts. */
+  blockCopyPaste: boolean;
+  /** Request fullscreen on start, emit fullscreen_exit if the user leaves. */
+  fullscreenRequired: boolean;
+}
+
 interface UseProctoringArgs {
   enabled: boolean;
+  config: ProctoringConfig;
   onViolation: (reason: ProctoringViolation) => void;
   onSnapshot?: (dataUrl: string) => void;
 }
@@ -63,6 +75,7 @@ export interface UseProctoringReturn {
 
 export function useProctoring({
   enabled,
+  config,
   onViolation,
   onSnapshot,
 }: UseProctoringArgs): UseProctoringReturn {
@@ -368,19 +381,58 @@ export function useProctoring({
     function onBlur() {
       emit("window_blur");
     }
+    function onFullscreenChange() {
+      if (!document.fullscreenElement) emit("fullscreen_exit");
+    }
+    function onCopyPaste(e: ClipboardEvent | Event) {
+      e.preventDefault();
+      emit("copy_paste");
+    }
+    function onContextMenu(e: MouseEvent) {
+      e.preventDefault();
+    }
 
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("blur", onBlur);
+    if (config.tabSwitchDetection) {
+      document.addEventListener("visibilitychange", onVisibility);
+      window.addEventListener("blur", onBlur);
+    }
+    if (config.fullscreenRequired) {
+      document.addEventListener("fullscreenchange", onFullscreenChange);
+      // Request fullscreen as soon as we mount. Browsers require this in a
+      // user gesture, so it may reject silently if mount isn't from a click —
+      // in that case the caller can request fullscreen on user interaction.
+      document.documentElement.requestFullscreen?.().catch(() => undefined);
+    }
+    if (config.blockCopyPaste) {
+      document.addEventListener("copy", onCopyPaste);
+      document.addEventListener("paste", onCopyPaste);
+      document.addEventListener("cut", onCopyPaste);
+      document.addEventListener("contextmenu", onContextMenu);
+    }
     start();
 
     return () => {
       cancelled = true;
       stoppedRef.current = true;
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("blur", onBlur);
+      if (config.tabSwitchDetection) {
+        document.removeEventListener("visibilitychange", onVisibility);
+        window.removeEventListener("blur", onBlur);
+      }
+      if (config.fullscreenRequired) {
+        document.removeEventListener("fullscreenchange", onFullscreenChange);
+        if (document.fullscreenElement) {
+          document.exitFullscreen?.().catch(() => undefined);
+        }
+      }
+      if (config.blockCopyPaste) {
+        document.removeEventListener("copy", onCopyPaste);
+        document.removeEventListener("paste", onCopyPaste);
+        document.removeEventListener("cut", onCopyPaste);
+        document.removeEventListener("contextmenu", onContextMenu);
+      }
       teardown();
     };
-  }, [enabled, teardown]);
+  }, [enabled, teardown, config.tabSwitchDetection, config.blockCopyPaste, config.fullscreenRequired]);
 
   return { videoRef, status, faceCount, detectorReady, stop };
 }

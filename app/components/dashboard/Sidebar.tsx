@@ -40,11 +40,10 @@ export default function Sidebar({
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition ${
-                active
+              className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition ${active
                   ? "bg-indigo-50 font-medium text-indigo-700"
                   : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              }`}
+                }`}
             >
               <span className="w-4 text-slate-400">{item.icon}</span>
               {item.label}

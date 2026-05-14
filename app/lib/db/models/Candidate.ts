@@ -46,11 +46,23 @@ export type CandidateStage =
   | "completed"
   | "rejected";
 
+export type PersistedQuestionType = "mcq" | "multi_select" | "descriptive" | "coding";
+
 export interface IPersistedQuizQuestion {
-  type: "mcq" | "descriptive";
+  type: PersistedQuestionType;
   text: string;
+  /** mcq + multi_select */
   options?: string[];
+  /** mcq only — index of the single correct option */
   correctIndex?: number;
+  /** multi_select only — indices of all correct options (order doesn't matter) */
+  correctIndices?: number[];
+  /** coding only — language slug the candidate writes in (matches AssessmentConfig.coding.languages) */
+  language?: string;
+  /** coding only — pre-filled code stub shown to the candidate */
+  starterCode?: string;
+  /** coding only — sample reference solution kept server-side as grading context, never sent to candidate */
+  referenceSolution?: string;
 }
 
 export interface ICandidate extends Document {
@@ -100,10 +112,18 @@ export interface ICandidate extends Document {
 
 const PersistedQuizQuestionSchema = new Schema<IPersistedQuizQuestion>(
   {
-    type: { type: String, enum: ["mcq", "descriptive"], required: true },
+    type: {
+      type: String,
+      enum: ["mcq", "multi_select", "descriptive", "coding"],
+      required: true,
+    },
     text: { type: String, required: true },
     options: { type: [String], default: undefined },
     correctIndex: { type: Number, default: undefined },
+    correctIndices: { type: [Number], default: undefined },
+    language: { type: String, default: undefined },
+    starterCode: { type: String, default: undefined },
+    referenceSolution: { type: String, default: undefined },
   },
   { _id: false }
 );
@@ -218,6 +238,15 @@ const CandidateSchema = new Schema<ICandidate>(
 // email-keyed queries still work and the new userId-keyed flow blocks dupes.
 CandidateSchema.index({ jobId: 1, userId: 1 }, { unique: true });
 CandidateSchema.index({ userId: 1, createdAt: -1 });
+
+// In dev, Next.js hot-reloads this module but Mongoose caches the compiled
+// model on the persistent connection — so schema edits are silently ignored
+// until a full process restart. Dropping the cached model here lets schema
+// changes take effect on hot-reload. Production never hot-reloads, so the
+// cache is kept untouched there.
+if (process.env.NODE_ENV !== "production" && mongoose.models.Candidate) {
+  mongoose.deleteModel("Candidate");
+}
 
 const Candidate: Model<ICandidate> =
   mongoose.models.Candidate ||
