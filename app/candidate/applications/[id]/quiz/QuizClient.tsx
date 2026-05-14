@@ -605,9 +605,21 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
       )}
 
       <form
+        // Implicit form submission was triggering an auto-submit the moment a
+        // candidate reached the coding question (the first turn the form had
+        // any type="submit" button at all — Enter on a focused MCQ radio /
+        // checkbox would fire it). We block ALL implicit submissions here and
+        // require an explicit click on the Submit button below.
         onSubmit={(e) => {
           e.preventDefault();
-          submit(false).catch(() => undefined);
+        }}
+        onKeyDown={(e) => {
+          // Defence-in-depth: also stop Enter from bubbling to the form.
+          // Textareas already handle Enter natively (newline); explicit
+          // submission happens via onClick on the Submit button.
+          if (e.key === "Enter" && e.target instanceof HTMLElement && e.target.tagName !== "TEXTAREA") {
+            e.preventDefault();
+          }
         }}
         className="space-y-4"
       >
@@ -751,7 +763,10 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
           </button>
           {isLast ? (
             <button
-              type="submit"
+              type="button"
+              onClick={() => {
+                submit(false).catch(() => undefined);
+              }}
               disabled={isExpired || phase === "submitting"}
               className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
             >
