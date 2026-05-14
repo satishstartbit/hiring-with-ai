@@ -3,6 +3,12 @@ import mongoose from "mongoose";
 import { connectDB } from "../../../../lib/db/connection";
 import InterviewSession from "../../../../lib/db/models/InterviewSession";
 import { runSendMessage } from "../../../../lib/workflow/interviewGraph";
+import {
+  ZERO_SCORES,
+  type PlannedQuestion,
+  type QuestionType,
+  type Difficulty,
+} from "../../../../lib/workflow/interviewState";
 
 export const dynamic = "force-dynamic";
 
@@ -29,18 +35,43 @@ export async function POST(
     return Response.json({ error: "Interview already completed" }, { status: 400 });
   }
 
+  const questions: PlannedQuestion[] = (session.questionPlan ?? []).length
+    ? session.questionPlan!.map((q) => ({
+        prompt: q.prompt,
+        type: q.type as QuestionType,
+        difficulty: q.difficulty as Difficulty,
+        skill: q.skill,
+        generatedAdaptively: q.generatedAdaptively,
+      }))
+    : session.questions.map((prompt) => ({
+        prompt,
+        type: "technical" as QuestionType,
+        difficulty: "medium" as Difficulty,
+        generatedAdaptively: false,
+      }));
+
   const result = await runSendMessage({
+    candidateId: session.candidateId.toString(),
+    jobId: session.jobId.toString(),
+    interviewSessionId: sessionId,
     jobTitle: session.jobTitle,
     jobRequirements: session.jobRequirements,
     candidateName: session.candidateName,
-    questions: session.questions,
+    resumeIntelligence: session.resumeIntelligence ?? null,
+    skillMatch: session.skillMatch ?? null,
+    strongSkills: session.strongSkills ?? [],
+    weakSkills: session.weakSkills ?? [],
+    questions,
+    currentQuestionIndex: session.currentQuestionIndex,
+    currentDifficulty: session.currentDifficulty ?? "medium",
     conversationHistory: session.conversationHistory.map((m) => ({
       role: m.role,
       content: m.content,
     })),
-    userMessage: message.trim(),
-    currentQuestionIndex: session.currentQuestionIndex,
     answers: session.answers,
+    evaluations: session.evaluations ?? [],
+    runningScores: session.dimensionScores ?? { ...ZERO_SCORES },
+    userMessage: message.trim(),
   });
 
   if (result.error) {
@@ -52,8 +83,15 @@ export async function POST(
       ...m,
       timestamp: new Date(),
     })),
+    // The DifficultyDecisionNode may have rewritten future question prompts —
+    // mirror that back into the legacy `questions` array so the UI stays in sync.
+    questions: result.questions.map((q) => q.prompt),
+    questionPlan: result.questions,
     currentQuestionIndex: result.currentQuestionIndex,
+    currentDifficulty: result.currentDifficulty,
     answers: result.answers,
+    evaluations: result.evaluations,
+    dimensionScores: result.runningScores,
     ...(result.isComplete ? { status: "completed", completedAt: new Date() } : {}),
   });
 
@@ -61,6 +99,6 @@ export async function POST(
     aiReply: result.aiReply,
     currentQuestionIndex: result.currentQuestionIndex,
     isComplete: result.isComplete,
-    totalQuestions: session.questions.length,
+    totalQuestions: result.questions.length,
   });
 }

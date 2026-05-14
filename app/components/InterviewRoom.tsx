@@ -1,12 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   INTERVIEW_PASSING_SCORE,
   INTERVIEW_QUESTION_COUNT,
   isInterviewPassed,
 } from "../lib/interviewConfig";
+import {
+  useProctoring,
+  type ProctoringViolation,
+} from "./proctoring/useProctoring";
 
 interface BrowserSpeechRecognitionAlternative {
   transcript: string;
@@ -86,8 +90,20 @@ interface InterviewResult {
 const SILENCE_TIMEOUT_MS = 2500;
 const MIN_WORDS = 10;
 
+// Browsers only expose camera/mic on a secure context. HTTPS, localhost,
+// 127.0.0.1, and ::1 are allowed; everything else (LAN IPs, custom hosts on
+// plain http) gets a null `navigator.mediaDevices`. Detect that early so the
+// candidate sees a clear message instead of a spinner that never resolves.
+function isSecureMediaOrigin(): boolean {
+  if (typeof window === "undefined") return true;
+  if (window.isSecureContext) return true;
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
 export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
+  const [insecureOrigin, setInsecureOrigin] = useState(false);
   const [session, setSession] = useState<SessionData | null>(null);
   const [currentQIdx, setCurrentQIdx] = useState(0);
   const [totalQuestions, setTotalQuestions] = useState(INTERVIEW_QUESTION_COUNT);
@@ -108,35 +124,86 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [isScheduling, setIsScheduling] = useState(false);
 
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accumulatedRef = useRef("");
   // Ref so startListening can call submitAnswer without a circular useCallback dependency
   const submitAnswerRef = useRef<(answer: string) => void>(() => {});
 
-  // ── Load session ────────────────────────────────────────────────────────────
-  // ── Camera / Mic ─────────────────────────────────────────────────────────────
-  const startCamera = useCallback(async () => {
-    setPhase("permission");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      streamRef.current = stream;
-      if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.muted = true; }
-    } catch {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        streamRef.current = stream;
-        setIsCamEnabled(false);
-      } catch {
-        setIsCamEnabled(false);
-      }
-    }
-    setPhase("ready");
+  // Proctoring violations — surfaced as transient warnings in the UI.
+  const [activeWarning, setActiveWarning] = useState<{
+    reason: ProctoringViolation;
+    label: string;
+  } | null>(null);
+  const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Proctoring + camera (owned by useProctoring) ────────────────────────────
+  // The hook acquires the camera+mic stream, runs face detection at 2.5fps, and
+  // emits violations. We enable it as soon as the session loads (so the
+  // candidate sees a live preview on the "ready" screen) and keep it running
+  // through the active interview.
+  //
+  // IMPORTANT: don't try to start the hook on an insecure origin — browsers
+  // make `navigator.mediaDevices` undefined there, and the hook would hang on
+  // "requesting" forever (this is why the page got stuck when accessed via a
+  // LAN IP). The insecureOrigin error screen is rendered before this can fire.
+  const proctoringEnabled =
+    !insecureOrigin &&
+    phase !== "loading" &&
+    phase !== "error" &&
+    phase !== "completed";
+  const proctoringConfig = useMemo(
+    () => ({
+      tabSwitchDetection: true,
+      blockCopyPaste: false,
+      fullscreenRequired: false,
+    }),
+    []
+  );
+
+  const handleViolation = useCallback((reason: ProctoringViolation) => {
+    const label = violationLabel(reason);
+    setActiveWarning({ reason, label });
+    if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+    warningTimerRef.current = setTimeout(() => setActiveWarning(null), 6000);
   }, []);
 
+  const { videoRef, status: proctoringStatus, faceCount, detectorReady, stop: stopProctoring } =
+    useProctoring({
+      enabled: proctoringEnabled,
+      config: proctoringConfig,
+      onViolation: handleViolation,
+    });
+
   useEffect(() => {
+    return () => {
+      if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+    };
+  }, []);
+
+  // Once the proctoring camera is ready, advance from "loading" to "ready".
+  // We're synchronizing our local phase to an external system (the proctoring
+  // hook's status, which is driven by camera permission + WASM init) — the
+  // canonical use case for useEffect.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (proctoringStatus === "requesting" && phase !== "permission") setPhase("permission");
+    if (proctoringStatus === "ready" && (phase === "permission" || phase === "loading")) {
+      setPhase("ready");
+    }
+  }, [proctoringStatus, phase]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    // Insecure-origin gate must run before we touch the camera. The proctoring
+    // hook would otherwise stall at "requesting" because navigator.mediaDevices
+    // is undefined on non-secure origins like http://192.168.x.x:3000.
+    if (!isSecureMediaOrigin()) {
+      setInsecureOrigin(true);
+      setPhase("error");
+      return;
+    }
     fetch(`/api/interview/${sessionId}`)
       .then((r) => r.json())
       .then((data: SessionData & { error?: string }) => {
@@ -151,15 +218,20 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           });
           setPhase("completed");
         } else {
-          void startCamera();
+          // Hand off to the proctoring hook — it will set phase to "permission" → "ready".
+          setPhase("permission");
         }
       })
       .catch(() => { setErrorMsg("Failed to load session."); setPhase("error"); });
-  }, [sessionId, startCamera]);
+  }, [sessionId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  function stopCamera() {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+  // Pulls the live stream off the video element so we can flip track.enabled
+  // for the user-facing mute/cam toggles without tearing down the proctoring
+  // stream (the hook keeps the camera on for detection regardless).
+  function getActiveStream(): MediaStream | null {
+    const so = videoRef.current?.srcObject;
+    return so instanceof MediaStream ? so : null;
   }
 
   // ── Speech Synthesis ──────────────────────────────────────────────────────────
@@ -195,13 +267,13 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       const data: InterviewResult & { error?: string } = await res.json();
       if (data.error) { setErrorMsg(data.error); setPhase("error"); return; }
       setResult(data);
-      stopCamera();
+      stopProctoring();
       setPhase("completed");
     } catch {
       setErrorMsg("Failed to grade interview.");
       setPhase("error");
     }
-  }, [sessionId]);
+  }, [sessionId, stopProctoring]);
 
   // ── Speech Recognition ────────────────────────────────────────────────────────
   // Uses submitAnswerRef so it doesn't depend on submitAnswer directly.
@@ -324,13 +396,15 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   }, [sessionId, speakText, startListening]);
 
   // ── Toggle cam/mic ────────────────────────────────────────────────────────────
+  // NOTE: toggling video.track.enabled freezes the frame which would defeat
+  // face detection. We hide the preview in the UI instead but leave the
+  // track running so proctoring continues to work.
   function toggleCamera() {
-    streamRef.current?.getVideoTracks().forEach((t) => { t.enabled = !t.enabled; });
     setIsCamEnabled((v) => !v);
   }
 
   function toggleMic() {
-    streamRef.current?.getAudioTracks().forEach((t) => { t.enabled = !t.enabled; });
+    getActiveStream()?.getAudioTracks().forEach((t) => { t.enabled = !t.enabled; });
     setIsMicEnabled((v) => !v);
   }
 
@@ -358,6 +432,51 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   }
 
   if (phase === "error") {
+    if (insecureOrigin) {
+      const currentHost = typeof window !== "undefined" ? window.location.host : "this URL";
+      const localhostUrl =
+        typeof window !== "undefined"
+          ? `${window.location.protocol}//localhost:${window.location.port || (window.location.protocol === "https:" ? "443" : "80")}${window.location.pathname}`
+          : null;
+      return (
+        <FullScreen>
+          <div className="max-w-md space-y-5 px-6 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-900/40 text-amber-300 text-2xl">
+              ⚠
+            </div>
+            <div>
+              <p className="text-lg font-bold text-white">Camera requires a secure connection</p>
+              <p className="mt-2 text-sm text-slate-300 leading-relaxed">
+                Your browser blocks camera and microphone access on{" "}
+                <code className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-200">
+                  {currentHost}
+                </code>
+                . AI interviews need both to run.
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-left text-xs text-slate-300">
+              <p className="mb-2 font-bold text-slate-100">How to fix this</p>
+              <ul className="space-y-1.5 list-disc list-inside marker:text-slate-500">
+                <li>
+                  Open this page on <code className="rounded bg-slate-800 px-1 text-slate-200">localhost</code>{" "}
+                  or <code className="rounded bg-slate-800 px-1 text-slate-200">127.0.0.1</code>
+                </li>
+                <li>Or serve the app over HTTPS (an HTTPS tunnel like ngrok works)</li>
+                <li>HTTPS is required for camera & microphone on every other origin</li>
+              </ul>
+            </div>
+            {localhostUrl && (
+              <a
+                href={localhostUrl}
+                className="block w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-500"
+              >
+                Open on localhost →
+              </a>
+            )}
+          </div>
+        </FullScreen>
+      );
+    }
     return (
       <FullScreen>
         <div className="text-center space-y-4 max-w-sm">
@@ -580,6 +699,10 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   }
 
   if (phase === "ready" || phase === "permission") {
+    const tooManyFaces = faceCount !== null && faceCount > 1;
+    const noFace = faceCount === 0;
+    const cameraReady = proctoringStatus === "ready";
+
     return (
       <FullScreen>
         <div className="w-full max-w-md space-y-6 px-4 text-center">
@@ -590,27 +713,66 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
             </p>
           </div>
 
-          {isCamEnabled && (
-            <div className="relative mx-auto h-48 w-64 overflow-hidden rounded-2xl bg-slate-800 border border-slate-700">
-              <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover scale-x-[-1]" />
-              {phase === "permission" && (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-800/70 text-slate-400 text-sm">
-                  Requesting camera…
-                </div>
-              )}
-            </div>
+          <div
+            className={`relative mx-auto h-56 w-72 overflow-hidden rounded-2xl border bg-slate-900 shadow-xl transition-colors ${
+              tooManyFaces
+                ? "border-red-500 shadow-red-500/30"
+                : noFace && cameraReady
+                ? "border-amber-500 shadow-amber-500/20"
+                : "border-slate-700"
+            }`}
+          >
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`h-full w-full object-cover scale-x-[-1] ${isCamEnabled ? "" : "opacity-0"}`}
+            />
+            {!cameraReady && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-slate-900/80 text-slate-400 text-sm">
+                <InterviewSpinner />
+                <span>Requesting camera…</span>
+              </div>
+            )}
+            {cameraReady && (
+              <FaceCountChip count={faceCount} detectorReady={detectorReady} />
+            )}
+          </div>
+
+          {/* Face / proctoring warnings */}
+          {cameraReady && tooManyFaces && (
+            <WarningBanner
+              title="Multiple people detected"
+              body={`We see ${faceCount} people in the frame. Please make sure only you are visible before starting the interview.`}
+              tone="danger"
+            />
+          )}
+          {cameraReady && noFace && detectorReady && (
+            <WarningBanner
+              title="No face detected"
+              body="Position your face clearly in the camera so we can verify you before starting."
+              tone="warning"
+            />
           )}
 
           <div className="space-y-2 text-sm text-slate-400">
             <p>✓ Allow camera & microphone when prompted</p>
+            <p>✓ Stay alone in the frame — we monitor for multiple people</p>
             <p>✓ Speak clearly and naturally — no time limit</p>
-            <p>✓ Say &quot;skip&quot; or press Skip to move to the next question</p>
           </div>
 
           {phase === "ready" && (
-            <button onClick={startInterview}
-              className="w-full rounded-xl bg-blue-600 px-6 py-4 text-base font-bold text-white transition-colors hover:bg-blue-500 shadow-lg shadow-blue-900/30">
-              Join Interview →
+            <button
+              onClick={startInterview}
+              disabled={tooManyFaces}
+              className={`w-full rounded-xl px-6 py-4 text-base font-bold text-white shadow-lg transition-colors ${
+                tooManyFaces
+                  ? "cursor-not-allowed bg-slate-700 shadow-none"
+                  : "bg-blue-600 shadow-blue-900/30 hover:bg-blue-500"
+              }`}
+            >
+              {tooManyFaces ? "Resolve warning to continue" : "Join Interview →"}
             </button>
           )}
         </div>
@@ -619,10 +781,13 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   }
 
   // ── Active interview ──────────────────────────────────────────────────────────
+  const tooManyFacesActive = faceCount !== null && faceCount > 1;
+  const noFaceActive = faceCount === 0;
+
   return (
-    <div className="fixed inset-0 flex flex-col bg-slate-950 text-white">
+    <div className="fixed inset-0 flex flex-col bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900 text-white">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800/80 bg-slate-950/70 backdrop-blur">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-bold">AI</div>
           <div>
@@ -631,6 +796,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <ProctoringChip faceCount={faceCount} detectorReady={detectorReady} />
           <span className="text-xs text-slate-400">
             Question {Math.min(currentQIdx + 1, totalQuestions)} of {totalQuestions}
           </span>
@@ -639,6 +805,23 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           }`} />
         </div>
       </div>
+
+      {/* Proctoring warning banner */}
+      {(tooManyFacesActive || activeWarning) && (
+        <div
+          className={`px-5 py-2 text-sm text-center font-medium ${
+            tooManyFacesActive || activeWarning?.reason === "multi_face"
+              ? "bg-red-950/70 text-red-200 border-b border-red-700/50"
+              : activeWarning?.reason === "no_face" || noFaceActive
+              ? "bg-amber-950/70 text-amber-200 border-b border-amber-700/50"
+              : "bg-slate-800/70 text-slate-200 border-b border-slate-700"
+          }`}
+        >
+          {tooManyFacesActive
+            ? `⚠ ${faceCount} people detected in frame. Only you should be visible.`
+            : activeWarning?.label}
+        </div>
+      )}
 
       {/* Progress bar */}
       <div className="h-0.5 w-full bg-slate-800">
@@ -704,12 +887,30 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           )}
         </div>
 
-        {/* User camera (bottom-right) */}
-        {isCamEnabled && (
-          <div className="absolute bottom-4 right-4 h-36 w-48 overflow-hidden rounded-xl border border-slate-700 bg-slate-800 shadow-xl">
-            <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover scale-x-[-1]" />
-          </div>
-        )}
+        {/* User camera (bottom-right) — always renders the proctoring video.
+            isCamEnabled only hides the visual; the stream stays live for
+            face detection so we keep monitoring throughout the interview. */}
+        <div
+          className={`absolute bottom-4 right-4 h-36 w-48 overflow-hidden rounded-xl border bg-slate-900 shadow-xl transition-colors ${
+            tooManyFacesActive
+              ? "border-red-500 shadow-red-500/30"
+              : "border-slate-700"
+          }`}
+        >
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className={`h-full w-full object-cover scale-x-[-1] ${isCamEnabled ? "" : "opacity-0"}`}
+          />
+          <FaceCountChip count={faceCount} detectorReady={detectorReady} compact />
+          {!isCamEnabled && (
+            <div className="absolute inset-0 flex items-center justify-center bg-slate-900 text-xs text-slate-400">
+              Camera hidden (still proctoring)
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Bottom controls */}
@@ -799,4 +1000,116 @@ function ControlButton({ onClick, active, label, icon }: {
       <span>{label}</span>
     </button>
   );
+}
+
+function WarningBanner({
+  title,
+  body,
+  tone,
+}: {
+  title: string;
+  body: string;
+  tone: "warning" | "danger";
+}) {
+  const styles =
+    tone === "danger"
+      ? "border-red-700 bg-red-950/60 text-red-200"
+      : "border-amber-700 bg-amber-950/60 text-amber-100";
+  return (
+    <div className={`rounded-xl border px-4 py-3 text-left ${styles}`}>
+      <p className="text-sm font-bold">⚠ {title}</p>
+      <p className="mt-1 text-xs leading-relaxed">{body}</p>
+    </div>
+  );
+}
+
+function FaceCountChip({
+  count,
+  detectorReady,
+  compact,
+}: {
+  count: number | null;
+  detectorReady: boolean;
+  compact?: boolean;
+}) {
+  if (!detectorReady) {
+    return (
+      <div
+        className={`absolute left-2 top-2 rounded-full bg-slate-900/80 ${
+          compact ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-1 text-xs"
+        } font-semibold text-slate-300 ring-1 ring-slate-700`}
+      >
+        ⋯ initializing
+      </div>
+    );
+  }
+  if (count === null) return null;
+  const ok = count === 1;
+  const tone = count > 1
+    ? "bg-red-900/80 text-red-200 ring-red-700"
+    : count === 0
+    ? "bg-amber-900/80 text-amber-200 ring-amber-700"
+    : "bg-emerald-900/80 text-emerald-200 ring-emerald-700";
+  return (
+    <div
+      className={`absolute left-2 top-2 rounded-full ring-1 ${tone} ${
+        compact ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-1 text-xs"
+      } font-semibold`}
+    >
+      {ok ? "● 1 person" : count === 0 ? "○ no face" : `⚠ ${count} people`}
+    </div>
+  );
+}
+
+function ProctoringChip({
+  faceCount,
+  detectorReady,
+}: {
+  faceCount: number | null;
+  detectorReady: boolean;
+}) {
+  if (!detectorReady) {
+    return (
+      <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-slate-800/70 px-2 py-0.5 text-xs text-slate-400 ring-1 ring-slate-700">
+        Proctoring…
+      </span>
+    );
+  }
+  if (faceCount === null) return null;
+  const ok = faceCount === 1;
+  const cls = faceCount > 1
+    ? "bg-red-950/70 text-red-300 ring-red-700/60"
+    : faceCount === 0
+    ? "bg-amber-950/70 text-amber-200 ring-amber-700/60"
+    : "bg-emerald-950/70 text-emerald-200 ring-emerald-700/60";
+  return (
+    <span className={`hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${cls}`}>
+      {ok ? "● Proctored" : faceCount === 0 ? "○ No face" : `⚠ ${faceCount} faces`}
+    </span>
+  );
+}
+
+function violationLabel(reason: ProctoringViolation): string {
+  switch (reason) {
+    case "multi_face":
+      return "Multiple people detected in frame. Only you should be visible.";
+    case "no_face":
+      return "We can't see your face. Please reposition yourself in front of the camera.";
+    case "camera_denied":
+      return "Camera access was denied. Please allow camera permission and reload.";
+    case "camera_lost":
+      return "Camera disconnected. Reconnect it to continue the interview.";
+    case "tab_switch":
+      return "Tab switch detected. Stay on this tab during the interview.";
+    case "window_blur":
+      return "Window lost focus. Keep this window active during the interview.";
+    case "voice_detected":
+      return "Other voices detected nearby. Find a quiet space and continue.";
+    case "fullscreen_exit":
+      return "Fullscreen was exited.";
+    case "copy_paste":
+      return "Copy / paste is not allowed during the interview.";
+    default:
+      return "Proctoring warning.";
+  }
 }

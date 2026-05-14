@@ -48,7 +48,7 @@ export default function SettingsClient({ initial }: { initial: Branding }) {
       <h2 className="mb-4 text-base font-semibold">Branding</h2>
       <div className="grid gap-4 sm:grid-cols-2">
         <TextField label="Logo URL" value={form.logoUrl} onChange={(v) => update("logoUrl", v)} />
-        <TextField
+        {/* <TextField
           label="Favicon URL"
           value={form.faviconUrl}
           onChange={(v) => update("faviconUrl", v)}
@@ -80,7 +80,7 @@ export default function SettingsClient({ initial }: { initial: Branding }) {
           value={form.careerPageTagline}
           onChange={(v) => update("careerPageTagline", v)}
           className="sm:col-span-2"
-        />
+        /> */}
       </div>
 
       <div className="mt-4 flex items-center justify-end gap-3">

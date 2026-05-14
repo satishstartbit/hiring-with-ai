@@ -19,10 +19,10 @@ export async function GET(
   const session = await InterviewSession.findById(sessionId).lean();
   if (!session) return Response.json({ error: "Session not found" }, { status: 404 });
 
-  const candidate = await Candidate
+  const candidate = (await Candidate
     .findById(session.candidateId)
     .select("resumeMatchScore answerScore")
-    .lean() as { resumeMatchScore?: number; answerScore?: number } | null;
+    .lean()) as { resumeMatchScore?: number; answerScore?: number } | null;
 
   return Response.json({
     sessionId: session._id.toString(),
@@ -34,16 +34,23 @@ export async function GET(
     scheduledAt: session.scheduledAt.toISOString(),
     startedAt: session.startedAt?.toISOString(),
     questions: session.questions,
+    questionPlan: session.questionPlan,
     currentQuestionIndex: session.currentQuestionIndex,
+    currentDifficulty: session.currentDifficulty,
     totalQuestions: session.questions.length,
     conversationHistory: session.conversationHistory.map((m) => ({
       role: m.role,
       content: m.content,
     })),
     totalScore: session.totalScore,
+    dimensionScores: session.dimensionScores,
     overallFeedback: session.overallFeedback,
     questionScores: session.questionScores,
     questionFeedback: session.questionFeedback,
+    resumeIntelligence: session.resumeIntelligence,
+    skillMatch: session.skillMatch,
+    strongSkills: session.strongSkills,
+    weakSkills: session.weakSkills,
     resumeMatchScore: candidate?.resumeMatchScore,
     answerScore: candidate?.answerScore,
   });

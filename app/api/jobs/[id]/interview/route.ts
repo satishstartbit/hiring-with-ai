@@ -6,6 +6,7 @@ import Candidate from "../../../../lib/db/models/Candidate";
 import InterviewSession from "../../../../lib/db/models/InterviewSession";
 import { runStartInterview } from "../../../../lib/workflow/interviewGraph";
 import { createCalBooking, getCalAvailableSlots, hasCalSchedulingConfig } from "../../../../lib/cal";
+import { extractResumeText } from "../../../../lib/ai/resumeText";
 
 export const dynamic = "force-dynamic";
 
@@ -108,17 +109,7 @@ export async function POST(
   const baseUrl = getBaseUrl(request);
 
   if (isImmediate) {
-    const result = await runStartInterview({
-      jobTitle: job.title,
-      jobDescription: job.description,
-      jobRequirements: job.requirements ?? [],
-      candidateName: candidate.name,
-    });
-
-    if (result.error) {
-      return Response.json({ error: result.error }, { status: 502 });
-    }
-
+    // Create the session first so we can pass its id into the graph for vector memory keying.
     const session = await InterviewSession.create({
       candidateId: candidate._id,
       jobId: job._id,
@@ -127,19 +118,56 @@ export async function POST(
       jobRequirements: job.requirements ?? [],
       candidateName: candidate.name,
       candidateEmail: candidate.email,
-      status: "in_progress",
+      status: "scheduled",
       scheduledAt,
-      startedAt: new Date(),
-      questions: result.questions,
-      conversationHistory: [{ role: "assistant", content: result.firstMessage, timestamp: new Date() }],
+      questions: [],
+      conversationHistory: [],
       answers: [],
       currentQuestionIndex: 0,
-      meetingUrl: `${baseUrl}/interview/${(await InterviewSession.findOne({ candidateId: candidate._id }).sort({ createdAt: -1 }).lean())?._id ?? ""}`,
     });
 
-    // Update meetingUrl with actual session id
     const meetingUrl = `${baseUrl}/interview/${session._id}`;
-    await InterviewSession.findByIdAndUpdate(session._id, { meetingUrl });
+
+    const resumeText = extractResumeText(
+      candidate.resumeData ? Buffer.from(candidate.resumeData) : null,
+      {
+        filename: candidate.resumeFilename,
+        contentType: candidate.resumeContentType,
+      }
+    );
+
+    const result = await runStartInterview({
+      candidateId: candidate._id.toString(),
+      jobId: job._id.toString(),
+      interviewSessionId: session._id.toString(),
+      jobTitle: job.title,
+      jobDescription: job.description,
+      jobRequirements: job.requirements ?? [],
+      candidateName: candidate.name,
+      resumeText,
+    });
+
+    if (result.error) {
+      await InterviewSession.findByIdAndDelete(session._id);
+      return Response.json({ error: result.error }, { status: 502 });
+    }
+
+    await InterviewSession.findByIdAndUpdate(session._id, {
+      status: "in_progress",
+      startedAt: new Date(),
+      questions: result.questions.map((q) => q.prompt),
+      questionPlan: result.questions,
+      conversationHistory: result.conversationHistory.map((m) => ({
+        ...m,
+        timestamp: new Date(),
+      })),
+      currentDifficulty: result.currentDifficulty,
+      resumeIntelligence: result.resumeIntelligence ?? undefined,
+      skillMatch: result.skillMatch ?? undefined,
+      strongSkills: result.strongSkills,
+      weakSkills: result.weakSkills,
+      meetingUrl,
+    });
 
     await Candidate.findByIdAndUpdate(candidateId, { status: "interviewing" });
 

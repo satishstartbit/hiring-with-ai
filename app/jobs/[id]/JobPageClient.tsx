@@ -209,7 +209,7 @@ export default function JobPageClient({ job }: Readonly<{ job: PublicJob }>) {
         </div>
       )}
 
-      <ApplicantsTable
+      {/* <ApplicantsTable
         candidates={candidatesData.candidates}
         total={candidatesData.total}
         page={candidatesData.page}
@@ -217,7 +217,7 @@ export default function JobPageClient({ job }: Readonly<{ job: PublicJob }>) {
         onPageChange={handlePageChange}
         onSearchChange={handleSearchChange}
         searchTerm={searchTerm}
-      />
+      /> */}
     </main>
   );
 }
