@@ -551,12 +551,11 @@ export default function AssessmentConfigForm({
           />
           <Toggle
             label="Webcam monitoring"
-            hint="Capture snapshots during the attempt. (Phase 3)"
+            hint="Detect multiple people or no face during the attempt."
             checked={cfg.antiCheat.webcamMonitoring}
             onChange={(v) =>
               patch("antiCheat", { ...cfg.antiCheat, webcamMonitoring: v })
             }
-            disabled
           />
           <Toggle
             label="Track suspicious activity"

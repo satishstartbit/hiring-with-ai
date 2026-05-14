@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { connectDB } from "../../../lib/db/connection";
 import InterviewSession from "../../../lib/db/models/InterviewSession";
 import Candidate from "../../../lib/db/models/Candidate";
+import AssessmentConfig from "../../../lib/db/models/AssessmentConfig";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,19 @@ export async function GET(
     .findById(session.candidateId)
     .select("resumeMatchScore answerScore")
     .lean()) as { resumeMatchScore?: number; answerScore?: number } | null;
+
+  // Pull the anti-cheat slice of the AssessmentConfig so the UI can decide
+  // whether to enable camera proctoring + fullscreen during the interview.
+  // The same config drives the quiz round — single source of truth for HR.
+  const assessmentConfig = await AssessmentConfig.findOne({ jobId: session.jobId })
+    .select("antiCheat")
+    .lean();
+  const antiCheat = {
+    tabSwitchDetection: assessmentConfig?.antiCheat?.tabSwitchDetection ?? true,
+    blockCopyPaste: assessmentConfig?.antiCheat?.blockCopyPaste ?? false,
+    fullscreenRequired: assessmentConfig?.antiCheat?.fullscreenRequired ?? false,
+    webcamMonitoring: assessmentConfig?.antiCheat?.webcamMonitoring ?? false,
+  };
 
   return Response.json({
     sessionId: session._id.toString(),
@@ -53,5 +67,6 @@ export async function GET(
     weakSkills: session.weakSkills,
     resumeMatchScore: candidate?.resumeMatchScore,
     answerScore: candidate?.answerScore,
+    antiCheat,
   });
 }

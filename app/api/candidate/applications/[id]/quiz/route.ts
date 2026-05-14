@@ -35,6 +35,7 @@ interface ClientAntiCheat {
   tabSwitchDetection: boolean;
   fullscreenRequired: boolean;
   blockCopyPaste: boolean;
+  webcamMonitoring: boolean;
   maxViolations: number;
 }
 
@@ -61,6 +62,7 @@ const DEFAULT_CLIENT_CONFIG: QuizConfigForClient = {
     tabSwitchDetection: true,
     fullscreenRequired: false,
     blockCopyPaste: true,
+    webcamMonitoring: false,
     maxViolations: 1,
   },
 };
@@ -117,6 +119,7 @@ interface RawConfig {
     tabSwitchDetection?: boolean;
     fullscreenRequired?: boolean;
     blockCopyPaste?: boolean;
+    webcamMonitoring?: boolean;
     maxViolations?: number;
   };
 }
@@ -136,6 +139,7 @@ function configForClient(config: RawConfig | null): QuizConfigForClient {
       tabSwitchDetection: config.antiCheat?.tabSwitchDetection ?? true,
       fullscreenRequired: config.antiCheat?.fullscreenRequired ?? false,
       blockCopyPaste: config.antiCheat?.blockCopyPaste ?? true,
+      webcamMonitoring: config.antiCheat?.webcamMonitoring ?? false,
       // maxViolations from config is "violations until termination". Treat
       // each violation before the last as a warning. Default 1 = no warning,
       // first violation closes immediately. Most teams configure 2+.

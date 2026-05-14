@@ -50,12 +50,19 @@ const SNAPSHOT_HEIGHT = 240;
 const SNAPSHOT_JPEG_QUALITY = 0.55;
 
 export interface ProctoringConfig {
-  /** Detect tab switch / window blur. Camera + face/voice detection are always on. */
+  /** Detect tab switch / window blur. */
   tabSwitchDetection: boolean;
   /** Block copy/paste/cut/context-menu; emit a copy_paste violation on attempts. */
   blockCopyPaste: boolean;
   /** Request fullscreen on start, emit fullscreen_exit if the user leaves. */
   fullscreenRequired: boolean;
+  /**
+   * Acquire the camera+mic stream and run face / voice detection + snapshots.
+   * When false the hook skips getUserMedia entirely (no permission prompt, no
+   * preview, no multi-face / no-face / voice_detected violations). Document-
+   * level listeners (tab switch / copy-paste / fullscreen) still run.
+   */
+  webcamMonitoring: boolean;
 }
 
 interface UseProctoringArgs {
@@ -197,6 +204,14 @@ export function useProctoring({
     }
 
     async function start() {
+      // HR disabled webcam monitoring on this assessment — skip camera
+      // acquisition entirely. Document-level listeners (tab switch / copy
+      // paste / fullscreen) still get wired below.
+      if (!config.webcamMonitoring) {
+        setStatus("ready");
+        return;
+      }
+
       setStatus("requesting");
       let stream: MediaStream;
       try {
@@ -432,7 +447,14 @@ export function useProctoring({
       }
       teardown();
     };
-  }, [enabled, teardown, config.tabSwitchDetection, config.blockCopyPaste, config.fullscreenRequired]);
+  }, [
+    enabled,
+    teardown,
+    config.tabSwitchDetection,
+    config.blockCopyPaste,
+    config.fullscreenRequired,
+    config.webcamMonitoring,
+  ]);
 
   return { videoRef, status, faceCount, detectorReady, stop };
 }

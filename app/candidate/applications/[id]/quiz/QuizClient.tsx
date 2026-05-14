@@ -24,6 +24,7 @@ interface ClientAntiCheat {
   tabSwitchDetection: boolean;
   fullscreenRequired: boolean;
   blockCopyPaste: boolean;
+  webcamMonitoring: boolean;
   maxViolations: number;
 }
 
@@ -331,6 +332,7 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
       tabSwitchDetection: config?.antiCheat.tabSwitchDetection ?? true,
       blockCopyPaste: config?.antiCheat.blockCopyPaste ?? false,
       fullscreenRequired: config?.antiCheat.fullscreenRequired ?? false,
+      webcamMonitoring: config?.antiCheat.webcamMonitoring ?? false,
     }),
     [config]
   );
@@ -480,18 +482,22 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
 
         <h3 className="mt-5 text-sm font-bold text-slate-900">Proctoring rules</h3>
         <ul className="mt-2 space-y-2 text-sm text-slate-700">
-          <li className="flex gap-2">
-            <span className="text-indigo-600">•</span>
-            We need access to your <strong>camera</strong> and <strong>microphone</strong> for the duration of the quiz.
-          </li>
-          <li className="flex gap-2">
-            <span className="text-indigo-600">•</span>
-            Only <strong>you</strong> should be visible. A second person in frame ends the quiz.
-          </li>
-          <li className="flex gap-2">
-            <span className="text-indigo-600">•</span>
-            Please stay in frame and <strong>do not talk</strong> while the quiz is running.
-          </li>
+          {antiCheat?.webcamMonitoring && (
+            <>
+              <li className="flex gap-2">
+                <span className="text-indigo-600">•</span>
+                We need access to your <strong>camera</strong> and <strong>microphone</strong> for the duration of the quiz.
+              </li>
+              <li className="flex gap-2">
+                <span className="text-indigo-600">•</span>
+                Only <strong>you</strong> should be visible. A second person in frame ends the quiz.
+              </li>
+              <li className="flex gap-2">
+                <span className="text-indigo-600">•</span>
+                Please stay in frame and <strong>do not talk</strong> while the quiz is running.
+              </li>
+            </>
+          )}
           {antiCheat?.tabSwitchDetection && (
             <li className="flex gap-2">
               <span className="text-indigo-600">•</span>
@@ -585,15 +591,18 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
   return (
     <div className="relative">
       {/* Proctoring preview — inline at the top on mobile so it never overlaps
-          the submit button; floats bottom-right on desktop where there's room. */}
-      <div className="mb-4 flex justify-center lg:fixed lg:bottom-4 lg:right-4 lg:z-40 lg:mb-0 lg:block">
-        <CameraPreview
-          videoRef={videoRef}
-          status={status}
-          faceCount={faceCount}
-          detectorReady={detectorReady}
-        />
-      </div>
+          the submit button; floats bottom-right on desktop where there's room.
+          Suppressed entirely when HR disabled webcam monitoring on this assessment. */}
+      {proctoringConfig.webcamMonitoring && (
+        <div className="mb-4 flex justify-center lg:fixed lg:bottom-4 lg:right-4 lg:z-40 lg:mb-0 lg:block">
+          <CameraPreview
+            videoRef={videoRef}
+            status={status}
+            faceCount={faceCount}
+            detectorReady={detectorReady}
+          />
+        </div>
+      )}
 
       <form
         onSubmit={(e) => {
