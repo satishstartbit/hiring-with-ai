@@ -24,14 +24,14 @@ export default async function LandingPage() {
         </nav>
       </header>
 
-      <section className="mx-auto max-w-3xl px-6 pt-16 pb-24 text-center">
+      <section className="mx-auto max-w-3xl px-6 pt-12 pb-16 text-center sm:pt-16 sm:pb-24">
         <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600">
           The AI-native hiring OS
         </span>
-        <h1 className="mt-6 text-5xl font-semibold tracking-tight text-slate-900">
+        <h1 className="mt-6 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
           Hire faster with an AI workforce built for recruiting teams.
         </h1>
-        <p className="mt-4 text-lg text-slate-600">
+        <p className="mt-4 text-base text-slate-600 sm:text-lg">
           Register your company, set up your workspace, manage recruiters and hiring managers, and
           plug into LinkedIn, Indeed, Naukri, and more — all from a single dashboard.
         </p>

@@ -584,6 +584,17 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
 
   return (
     <div className="relative">
+      {/* Proctoring preview — inline at the top on mobile so it never overlaps
+          the submit button; floats bottom-right on desktop where there's room. */}
+      <div className="mb-4 flex justify-center lg:fixed lg:bottom-4 lg:right-4 lg:z-40 lg:mb-0 lg:block">
+        <CameraPreview
+          videoRef={videoRef}
+          status={status}
+          faceCount={faceCount}
+          detectorReady={detectorReady}
+        />
+      </div>
+
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -755,15 +766,6 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
           </div>
         )}
       </form>
-
-      <div className="fixed bottom-4 right-4 z-40">
-        <CameraPreview
-          videoRef={videoRef}
-          status={status}
-          faceCount={faceCount}
-          detectorReady={detectorReady}
-        />
-      </div>
 
       {warningModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">

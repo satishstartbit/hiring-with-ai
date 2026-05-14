@@ -177,8 +177,8 @@ export default function TeamClient({
         </form>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table className="w-full min-w-[560px] text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-4 py-2">Member</th>
@@ -326,7 +326,7 @@ function InviteResultBanner({
           Fallback temp password
         </summary>
         <p className="mt-1">
-          If the link doesn't reach them, they can log in with:{" "}
+          If the link doesn&apos;t reach them, they can log in with:{" "}
           <code className="rounded bg-white px-1.5 py-0.5">{invite.tempPassword}</code>
         </p>
       </details>

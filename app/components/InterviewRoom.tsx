@@ -713,7 +713,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       </div>
 
       {/* Bottom controls */}
-      <div className="flex items-center justify-center gap-4 border-t border-slate-800 px-5 py-4">
+      <div className="flex flex-wrap items-center justify-center gap-2 border-t border-slate-800 px-4 py-4 sm:gap-4 sm:px-5">
         <ControlButton onClick={toggleMic} active={isMicEnabled}
           label={isMicEnabled ? "Mic On" : "Mic Off"} icon={isMicEnabled ? "🎤" : "🔇"} />
         <ControlButton onClick={toggleCamera} active={isCamEnabled}
