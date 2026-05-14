@@ -6,10 +6,6 @@ import { INTEGRATION_PROVIDERS, type IntegrationProvider } from "@/app/lib/const
 
 const LABELS: Record<IntegrationProvider, string> = {
   linkedin: "LinkedIn",
-  indeed: "Indeed",
-  naukri: "Naukri",
-  monster: "Monster",
-  glassdoor: "Glassdoor",
 };
 
 export default function RepublishButton({ jobId }: { jobId: string }) {

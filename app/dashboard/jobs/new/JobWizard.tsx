@@ -56,10 +56,6 @@ function formatApiError(error: unknown): string {
 
 const PROVIDER_META: Record<IntegrationProvider, { name: string; gradient: string }> = {
   linkedin: { name: "LinkedIn", gradient: "from-sky-500 to-blue-600" },
-  indeed: { name: "Indeed", gradient: "from-indigo-500 to-blue-500" },
-  naukri: { name: "Naukri", gradient: "from-fuchsia-500 to-rose-500" },
-  monster: { name: "Monster", gradient: "from-purple-500 to-violet-600" },
-  glassdoor: { name: "Glassdoor", gradient: "from-emerald-500 to-teal-600" },
 };
 
 const EMPTY_DRAFT: Draft = {

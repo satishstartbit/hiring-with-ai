@@ -8,10 +8,8 @@ import type { Role } from "@/app/lib/db/models/User";
 import BrandLogo from "@/app/components/BrandLogo";
 
 const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: "□" },
   { href: "/dashboard/jobs", label: "Jobs", icon: "▤" },
   { href: "/dashboard/candidates", label: "Candidates", icon: "◉" },
-  { href: "/dashboard/interviews", label: "AI Interviews", icon: "◑" },
   { href: "/dashboard/integrations", label: "Integrations", icon: "⌬" },
   { href: "/dashboard/team", label: "Team", icon: "☷" },
   { href: "/dashboard/settings", label: "Settings", icon: "⚙" },
@@ -46,7 +44,7 @@ export default function Sidebar({
   function navBody() {
     return (
       <>
-        <Link href="/dashboard" className="mb-6 block" onClick={close}>
+        <Link href="/dashboard/jobs" className="mb-6 block" onClick={close}>
           <BrandLogo size="md" imageClassName="h-12 w-auto" />
           <p className="mt-2 truncate text-xs text-slate-500">{workspaceName}</p>
         </Link>
@@ -54,8 +52,7 @@ export default function Sidebar({
         <nav className="flex-1 space-y-1">
           {NAV.map((item) => {
             const active =
-              pathname === item.href ||
-              (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
+              pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link
                 key={item.href}

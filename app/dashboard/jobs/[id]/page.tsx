@@ -13,10 +13,6 @@ export const metadata = { title: "Job — HireAI" };
 
 const PROVIDER_LABEL: Record<IntegrationProvider, string> = {
   linkedin: "LinkedIn",
-  indeed: "Indeed",
-  naukri: "Naukri",
-  monster: "Monster",
-  glassdoor: "Glassdoor",
 };
 
 export default async function JobDetailPage({

@@ -26,27 +26,6 @@ export async function dispatchPublish({
     deletedAt: null,
   })) as IntegrationDoc | null;
 
-  switch (provider) {
-    case "linkedin":
-      return publishJobToLinkedIn(job, integration, publicJobUrl);
-
-    case "indeed":
-    case "naukri":
-    case "monster":
-    case "glassdoor":
-      // Stubbed identically to LinkedIn for now. Phase 3 wires partner APIs per provider.
-      if (!integration || integration.status !== "connected") {
-        return {
-          ok: false,
-          errorCode: "not_connected",
-          message: `${provider} account is not connected for this recruiter.`,
-        };
-      }
-      return {
-        ok: true,
-        externalPostId: `${provider}-${Date.now()}`,
-        externalUrl: publicJobUrl,
-        metadata: { stub: true, provider, jobTitle: job.title },
-      };
-  }
+  // LinkedIn is the only supported provider today.
+  return publishJobToLinkedIn(job, integration, publicJobUrl);
 }

@@ -15,26 +15,6 @@ const META: Record<IntegrationProvider, { name: string; gradient: string; descri
     gradient: "from-sky-500 to-blue-600",
     description: "OAuth sync of profile + share jobs to your feed.",
   },
-  indeed: {
-    name: "Indeed",
-    gradient: "from-indigo-500 to-blue-500",
-    description: "Sync candidates and post sponsored listings.",
-  },
-  naukri: {
-    name: "Naukri",
-    gradient: "from-fuchsia-500 to-rose-500",
-    description: "Connect to source Indian-market candidates.",
-  },
-  monster: {
-    name: "Monster",
-    gradient: "from-purple-500 to-violet-600",
-    description: "Cross-post jobs to the Monster network.",
-  },
-  glassdoor: {
-    name: "Glassdoor",
-    gradient: "from-emerald-500 to-teal-600",
-    description: "Manage employer brand and sourced candidates.",
-  },
 };
 
 export default async function IntegrationsPage() {

@@ -33,7 +33,7 @@ export default async function LandingPage() {
         </h1>
         <p className="mt-4 text-base text-slate-600 sm:text-lg">
           Register your company, set up your workspace, manage recruiters and hiring managers, and
-          plug into LinkedIn, Indeed, Naukri, and more — all from a single dashboard.
+          publish jobs straight to LinkedIn — all from a single dashboard.
         </p>
         <div className="mt-8 flex items-center justify-center gap-3">
           <Link
@@ -58,8 +58,8 @@ export default async function LandingPage() {
             body: "Each company gets its own branded workspace with roles for admins, recruiters, HR, and hiring managers.",
           },
           {
-            title: "Job board integrations",
-            body: "Connect LinkedIn, Indeed, Naukri, Monster, and Glassdoor. Sync postings and manage applicants in one place.",
+            title: "LinkedIn integration",
+            body: "Connect LinkedIn to publish job postings and manage applicants in one place.",
           },
           {
             title: "AI screening & interviews",

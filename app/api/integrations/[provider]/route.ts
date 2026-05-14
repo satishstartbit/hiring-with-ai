@@ -13,10 +13,6 @@ function isProvider(value: string): value is IntegrationProvider {
 
 const PROVIDER_SCOPES: Record<IntegrationProvider, string> = {
   linkedin: "r_liteprofile r_emailaddress w_member_social",
-  indeed: "employer.listings.read employer.listings.write",
-  naukri: "candidate.search jobs.publish",
-  monster: "jobs.publish candidates.read",
-  glassdoor: "employer.read employer.write",
 };
 
 function stubProfileSnapshot(provider: IntegrationProvider, email: string) {
