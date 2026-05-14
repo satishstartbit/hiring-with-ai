@@ -8,7 +8,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="flex">
-        <Sidebar role={user.role} workspaceName={ctx.workspace.name} />
+        <Sidebar workspaceName={ctx.workspace.name} />
         <div className="flex min-h-screen w-full flex-col lg:pl-64">
           {/* pl-16 on mobile leaves room for the Sidebar's fixed hamburger. */}
           <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-slate-200 bg-white/80 py-3 pl-16 pr-4 backdrop-blur sm:pr-6 lg:px-6">

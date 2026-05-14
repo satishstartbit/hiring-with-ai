@@ -54,7 +54,7 @@ export default async function CandidatesListPage() {
     stage: { $in: PASSED_STAGES },
   })
     .select(
-      "_id name email currentTitle currentCompany jobTitle stage resumeMatchScore answerScore proctoringFlagged interviewSessionId quizSubmittedAt updatedAt"
+      "_id name email currentTitle currentCompany jobTitle stage resumeFilename resumeMatchScore answerScore proctoringFlagged interviewSessionId quizSubmittedAt updatedAt"
     )
     .sort({ quizSubmittedAt: -1, updatedAt: -1 })
     .lean();
@@ -94,12 +94,13 @@ export default async function CandidatesListPage() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="w-full min-w-[820px] text-sm">
+          <table className="w-full min-w-[920px] text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-2">Candidate</th>
                 <th className="px-4 py-2">Job</th>
                 <th className="px-4 py-2">Resume</th>
+                <th className="px-4 py-2">Match</th>
                 <th className="px-4 py-2">Quiz</th>
                 <th className="px-4 py-2">Interview</th>
                 <th className="px-4 py-2">Stage</th>
@@ -137,6 +138,42 @@ export default async function CandidatesListPage() {
                       {role && <div className="text-xs text-slate-400">{role}</div>}
                     </td>
                     <td className="px-4 py-3 text-slate-700">{c.jobTitle}</td>
+                    <td className="px-4 py-3">
+                      {c.resumeFilename ? (
+                        <a
+                          href={`/api/resumes/${id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={`View ${c.resumeFilename}`}
+                          className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100"
+                        >
+                          <svg
+                            className="h-3 w-3"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                            />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                            />
+                          </svg>
+                          View
+                        </a>
+                      ) : (
+                        <span className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-500">
+                          No resume
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <ScoreCell score={c.resumeMatchScore} />
                     </td>

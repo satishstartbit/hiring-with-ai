@@ -227,6 +227,59 @@ export default async function CandidateDetailPage({
         </section>
       )}
 
+      {/* Resume preview */}
+      {candidate.resumeFilename && (
+        <section className="mb-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-slate-900">Resume</h2>
+              <p className="truncate text-xs text-slate-500">
+                {candidate.resumeFilename}
+                {candidate.resumeContentType && (
+                  <> · {candidate.resumeContentType}</>
+                )}
+              </p>
+            </div>
+            <div className="flex flex-none gap-2">
+              <a
+                href={`/api/resumes/${String(candidate._id)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Open in new tab ↗
+              </a>
+              <a
+                href={`/api/resumes/${String(candidate._id)}`}
+                download={candidate.resumeFilename}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Download
+              </a>
+            </div>
+          </div>
+          {candidate.resumeContentType === "application/pdf" ? (
+            <iframe
+              src={`/api/resumes/${String(candidate._id)}#toolbar=0&navpanes=0`}
+              title={`Resume — ${candidate.name}`}
+              className="block h-[760px] w-full bg-slate-50"
+            />
+          ) : (
+            <div className="px-5 py-8 text-center">
+              <div className="mx-auto mb-2 grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-xl text-slate-500">
+                📄
+              </div>
+              <p className="text-sm font-medium text-slate-700">
+                Inline preview isn&apos;t available for this file type
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Open it in a new tab or download to review the resume.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* AI Report */}
       {aiReport && (
         <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5">

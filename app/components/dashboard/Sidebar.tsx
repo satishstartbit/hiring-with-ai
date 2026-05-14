@@ -3,8 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ROLE_LABELS } from "@/app/lib/auth/permissions";
-import type { Role } from "@/app/lib/db/models/User";
 import BrandLogo from "@/app/components/BrandLogo";
 
 const NAV = [
@@ -16,10 +14,8 @@ const NAV = [
 ];
 
 export default function Sidebar({
-  role,
   workspaceName,
 }: {
-  role: Role;
   workspaceName: string;
 }) {
   const pathname = usePathname();
@@ -70,11 +66,6 @@ export default function Sidebar({
             );
           })}
         </nav>
-
-        <div className="mt-6 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          <p className="font-medium text-slate-700">{ROLE_LABELS[role]}</p>
-          <p className="text-slate-500">Role-based access enabled</p>
-        </div>
       </>
     );
   }

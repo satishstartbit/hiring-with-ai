@@ -80,8 +80,7 @@ export default function JobPageClient({ job }: Readonly<{ job: PublicJob }>) {
     (async () => {
       try {
         const res = await fetch(
-          `/api/candidates?jobId=${job._id}&page=${candidatesData.page}&limit=10${
-            searchTerm ? `&search=${encodeURIComponent(searchTerm)}` : ""
+          `/api/candidates?jobId=${job._id}&page=${candidatesData.page}&limit=10${searchTerm ? `&search=${encodeURIComponent(searchTerm)}` : ""
           }`
         );
         if (!res.ok) return;
