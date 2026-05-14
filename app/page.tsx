@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { optionalSession } from "@/app/lib/auth/dal";
 import { redirect } from "next/navigation";
+import BrandLogo from "@/app/components/BrandLogo";
 
 export default async function LandingPage() {
   const session = await optionalSession();
@@ -9,12 +10,7 @@ export default async function LandingPage() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-50 text-slate-900">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <Link href="/" className="flex items-center gap-2 text-base font-semibold">
-          <span className="grid h-8 w-8 place-items-center rounded-md bg-indigo-600 text-white">
-            H
-          </span>
-          <span>HireAI</span>
-        </Link>
+        <BrandLogo href="/" size="md" priority imageClassName="h-11 w-auto" />
         <nav className="flex items-center gap-3 text-sm">
           <Link href="/login" className="text-slate-600 hover:text-slate-900">
             Sign in

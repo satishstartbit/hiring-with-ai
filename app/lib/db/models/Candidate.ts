@@ -11,6 +11,22 @@ export interface IProctoringSnapshot {
   capturedAt: Date;
 }
 
+export type ProctoringViolationType =
+  | "camera_denied"
+  | "camera_lost"
+  | "tab_switch"
+  | "window_blur"
+  | "multi_face"
+  | "no_face"
+  | "voice_detected";
+
+export interface IProctoringViolation {
+  type: ProctoringViolationType;
+  /** "warning" = first offence, user was warned. "terminate" = quiz force-closed. */
+  level: "warning" | "terminate";
+  at: Date;
+}
+
 /**
  * Where the candidate is in the multi-session apply pipeline.
  *
@@ -56,6 +72,9 @@ export interface ICandidate extends Document {
   resumeContentType?: string;
   applicationAnswers?: IApplicationAnswer[];
   proctoringSnapshots?: IProctoringSnapshot[];
+  proctoringViolations?: IProctoringViolation[];
+  /** Set true when the quiz was force-closed by the proctoring system. */
+  proctoringFlagged?: boolean;
   /** Quiz questions persisted on first open so the candidate replays the same set across sessions. */
   quizQuestions?: IPersistedQuizQuestion[];
   quizTimeLimitSeconds?: number;
@@ -149,6 +168,32 @@ const CandidateSchema = new Schema<ICandidate>(
       ],
       default: [],
     },
+    proctoringViolations: {
+      type: [
+        new Schema<IProctoringViolation>(
+          {
+            type: {
+              type: String,
+              enum: [
+                "camera_denied",
+                "camera_lost",
+                "tab_switch",
+                "window_blur",
+                "multi_face",
+                "no_face",
+                "voice_detected",
+              ],
+              required: true,
+            },
+            level: { type: String, enum: ["warning", "terminate"], required: true },
+            at: { type: Date, default: Date.now },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
+    proctoringFlagged: { type: Boolean, default: false },
     quizQuestions: { type: [PersistedQuizQuestionSchema], default: undefined },
     quizTimeLimitSeconds: { type: Number },
     quizStartedAt: { type: Date },

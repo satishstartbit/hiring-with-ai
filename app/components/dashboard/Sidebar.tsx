@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ROLE_LABELS } from "@/app/lib/auth/permissions";
 import type { Role } from "@/app/lib/db/models/User";
+import BrandLogo from "@/app/components/BrandLogo";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: "□" },
@@ -25,14 +26,9 @@ export default function Sidebar({
   const pathname = usePathname();
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white px-4 py-5 lg:flex">
-      <Link href="/dashboard" className="mb-6 flex items-center gap-2">
-        <span className="grid h-8 w-8 place-items-center rounded-md bg-indigo-600 text-sm font-bold text-white">
-          H
-        </span>
-        <div className="leading-tight">
-          <p className="text-sm font-semibold">HireAI</p>
-          <p className="truncate text-xs text-slate-500">{workspaceName}</p>
-        </div>
+      <Link href="/dashboard" className="mb-6 block">
+        <BrandLogo size="md" imageClassName="h-12 w-auto" />
+        <p className="mt-2 truncate text-xs text-slate-500">{workspaceName}</p>
       </Link>
 
       <nav className="flex-1 space-y-1">

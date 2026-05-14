@@ -27,7 +27,6 @@ export default function CameraPreview({
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-900 p-2 shadow-sm">
       <div className="relative overflow-hidden rounded-md bg-black">
-        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
         <video
           ref={videoRef}
           playsInline

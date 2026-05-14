@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCurrentCandidate, getCurrentUser, optionalSession } from "@/app/lib/auth/dal";
 import CandidateUserMenu from "@/app/candidate/CandidateUserMenu";
 import UserMenu from "@/app/components/dashboard/UserMenu";
+import BrandLogo from "@/app/components/BrandLogo";
 
 export default async function JobsLayout({ children }: Readonly<{ children: ReactNode }>) {
   const session = await optionalSession();
@@ -16,14 +17,8 @@ export default async function JobsLayout({ children }: Readonly<{ children: Reac
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex items-center gap-6">
-            <Link
-              href={homeHref}
-              className="flex items-center gap-2 text-base font-semibold text-slate-900"
-            >
-              <span className="grid h-8 w-8 place-items-center rounded-md bg-indigo-600 text-white">
-                H
-              </span>
-              <span>HireAI</span>
+            <Link href={homeHref} className="flex items-center gap-3 text-base font-semibold text-slate-900">
+              <BrandLogo size="sm" imageClassName="h-9 w-auto" />
               {candidate ? (
                 <span className="hidden rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600 sm:inline">
                   Candidate

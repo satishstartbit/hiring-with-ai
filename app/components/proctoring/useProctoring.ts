@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import type { FaceDetector } from "@mediapipe/tasks-vision";
 
 export type ProctoringViolation =
@@ -9,12 +10,11 @@ export type ProctoringViolation =
   | "tab_switch"
   | "window_blur"
   | "multi_face"
-  | "no_face";
+  | "no_face"
+  | "voice_detected";
 
 export type ProctoringStatus = "idle" | "requesting" | "ready" | "terminated";
 
-// MediaPipe WASM + model files are pulled from public CDNs the first time the
-// quiz is entered. This avoids shipping ~3MB of WASM in our own bundle.
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.20/wasm";
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
@@ -23,11 +23,20 @@ const MODEL_URL =
 // per offending frame and decays -1 per clean frame, the thresholds below mean:
 //   multi-face triggers after ~1.6s of sustained 2+ faces (4 hits, score = 4)
 //   no-face triggers after ~5s of sustained 0 faces (12 hits)
-// Brief flickers (1 face → 2 faces → 1 face) no longer reset the counter to
-// zero — the score climbs slower but still climbs.
 const DETECT_INTERVAL_MS = 400;
 const MULTI_FACE_TRIGGER_SCORE = 4;
 const NO_FACE_TRIGGER_SCORE = 12;
+
+// Voice detection: RMS (0..1) above threshold for ~3.2s of sustained audio.
+const VOICE_RMS_THRESHOLD = 0.08;
+const VOICE_TRIGGER_SCORE = 8;
+const VOICE_SAMPLE_INTERVAL_MS = 400;
+
+// After a violation fires, suppress further emissions for this long so the
+// caller has time to show a warning and the candidate has time to react.
+// Without this a sustained violation (e.g. 2 faces still in frame) would
+// re-fire on the next tick and instantly burn through the warning budget.
+const VIOLATION_COOLDOWN_MS = 6000;
 
 // Snapshot config: capture up to 7 JPEGs spread across the quiz so the
 // recruiter has visual evidence of who took the test.
@@ -40,11 +49,23 @@ const SNAPSHOT_JPEG_QUALITY = 0.55;
 
 interface UseProctoringArgs {
   enabled: boolean;
-  onTerminate: (reason: ProctoringViolation) => void;
+  onViolation: (reason: ProctoringViolation) => void;
   onSnapshot?: (dataUrl: string) => void;
 }
 
-export function useProctoring({ enabled, onTerminate, onSnapshot }: UseProctoringArgs) {
+export interface UseProctoringReturn {
+  videoRef: RefObject<HTMLVideoElement | null>;
+  status: ProctoringStatus;
+  faceCount: number | null;
+  detectorReady: boolean;
+  stop: () => void;
+}
+
+export function useProctoring({
+  enabled,
+  onViolation,
+  onSnapshot,
+}: UseProctoringArgs): UseProctoringReturn {
   const [status, setStatus] = useState<ProctoringStatus>("idle");
   const [faceCount, setFaceCount] = useState<number | null>(null);
   const [detectorReady, setDetectorReady] = useState(false);
@@ -58,74 +79,105 @@ export function useProctoring({ enabled, onTerminate, onSnapshot }: UseProctorin
   const snapshotIntervalRef = useRef<number | null>(null);
   const snapshotCountRef = useRef(0);
 
-  // Decaying scores: incremented on a violating frame, decremented (floored at
-  // 0) on a clean frame. Trigger when score crosses the threshold.
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioAnalyserRef = useRef<AnalyserNode | null>(null);
+  const audioBufferRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  const audioIntervalRef = useRef<number | null>(null);
+
   const multiFaceScoreRef = useRef(0);
   const noFaceScoreRef = useRef(0);
-  const terminatedRef = useRef(false);
+  const voiceScoreRef = useRef(0);
+  const lastEmitAtRef = useRef(0);
+  const stoppedRef = useRef(false);
 
-  const onTerminateRef = useRef(onTerminate);
+  const onViolationRef = useRef(onViolation);
   const onSnapshotRef = useRef(onSnapshot);
   useEffect(() => {
-    onTerminateRef.current = onTerminate;
-  }, [onTerminate]);
+    onViolationRef.current = onViolation;
+  }, [onViolation]);
   useEffect(() => {
     onSnapshotRef.current = onSnapshot;
   }, [onSnapshot]);
 
+  const teardown = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (snapshotTimeoutRef.current !== null) {
+      clearTimeout(snapshotTimeoutRef.current);
+      snapshotTimeoutRef.current = null;
+    }
+    if (snapshotIntervalRef.current !== null) {
+      clearInterval(snapshotIntervalRef.current);
+      snapshotIntervalRef.current = null;
+    }
+    if (audioIntervalRef.current !== null) {
+      clearInterval(audioIntervalRef.current);
+      audioIntervalRef.current = null;
+    }
+    if (streamRef.current) {
+      for (const track of streamRef.current.getTracks()) track.stop();
+      streamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => undefined);
+      audioContextRef.current = null;
+      audioAnalyserRef.current = null;
+      audioBufferRef.current = null;
+    }
+    if (detectorRef.current) {
+      try {
+        detectorRef.current.close();
+      } catch {
+        // detector close is best-effort
+      }
+      detectorRef.current = null;
+    }
+  }, []);
+
+  const stop = useCallback(() => {
+    if (stoppedRef.current) return;
+    stoppedRef.current = true;
+    setStatus("terminated");
+    teardown();
+  }, [teardown]);
+
   useEffect(() => {
     if (!enabled) return;
-    terminatedRef.current = false;
+    stoppedRef.current = false;
     multiFaceScoreRef.current = 0;
     noFaceScoreRef.current = 0;
+    voiceScoreRef.current = 0;
     snapshotCountRef.current = 0;
-    setDetectorReady(false);
+    lastEmitAtRef.current = 0;
     let cancelled = false;
 
-    function teardown() {
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-      if (snapshotTimeoutRef.current !== null) {
-        clearTimeout(snapshotTimeoutRef.current);
-        snapshotTimeoutRef.current = null;
-      }
-      if (snapshotIntervalRef.current !== null) {
-        clearInterval(snapshotIntervalRef.current);
-        snapshotIntervalRef.current = null;
-      }
-      if (streamRef.current) {
-        for (const track of streamRef.current.getTracks()) track.stop();
-        streamRef.current = null;
-      }
-      if (detectorRef.current) {
-        try {
-          detectorRef.current.close();
-        } catch {
-          // detector close is best-effort
-        }
-        detectorRef.current = null;
-      }
-    }
-
     function emit(reason: ProctoringViolation) {
-      if (terminatedRef.current) return;
-      terminatedRef.current = true;
-      setStatus("terminated");
-      teardown();
-      onTerminateRef.current(reason);
+      if (stoppedRef.current) return;
+      // Catastrophic events bypass cooldown — the caller needs to know
+      // immediately that the camera isn't usable.
+      const fatal = reason === "camera_denied" || reason === "camera_lost";
+      const now = performance.now();
+      if (!fatal && now - lastEmitAtRef.current < VIOLATION_COOLDOWN_MS) return;
+      lastEmitAtRef.current = now;
+      // Reset per-type scores so the same sustained signal needs to re-build
+      // before triggering again.
+      if (reason === "multi_face") multiFaceScoreRef.current = 0;
+      if (reason === "no_face") noFaceScoreRef.current = 0;
+      if (reason === "voice_detected") voiceScoreRef.current = 0;
+      onViolationRef.current(reason);
     }
 
     async function acquireStream(): Promise<MediaStream> {
       try {
         return await navigator.mediaDevices.getUserMedia({
           video: { width: 320, height: 240, facingMode: "user" },
-          audio: false,
+          audio: true,
         });
       } catch (firstErr) {
         if (firstErr instanceof DOMException && firstErr.name === "OverconstrainedError") {
-          return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         }
         throw firstErr;
       }
@@ -152,11 +204,12 @@ export function useProctoring({ enabled, onTerminate, onSnapshot }: UseProctorin
         videoRef.current.muted = true;
         await videoRef.current.play().catch(() => {});
       }
-      // If the OS / user kills the device track (e.g. unplugs the camera),
-      // treat it as a fail-closed event so candidates can't bypass by
-      // disabling the camera mid-quiz.
       for (const track of stream.getTracks()) {
-        track.addEventListener("ended", () => emit("camera_lost"));
+        // Only video track loss is fatal — losing the mic is a separate signal
+        // (handled as voice_unavailable would be over-engineering for now).
+        if (track.kind === "video") {
+          track.addEventListener("ended", () => emit("camera_lost"));
+        }
       }
       setStatus("ready");
 
@@ -164,12 +217,12 @@ export function useProctoring({ enabled, onTerminate, onSnapshot }: UseProctorin
         await initDetector();
         setDetectorReady(true);
       } catch (err) {
-        // CDN unreachable, WASM blocked, etc. We still want the camera + tab
-        // listeners to enforce, but multi-face checks are unavailable. Log
-        // loudly so this is debuggable in DevTools.
+        // CDN unreachable / WASM blocked — face checks unavailable but the
+        // camera and tab listeners still enforce. Log for debuggability.
         console.error("[proctoring] face detector init failed:", err);
       }
 
+      initAudioAnalyser(stream);
       scheduleSnapshots();
       runDetectionLoop();
     }
@@ -184,8 +237,53 @@ export function useProctoring({ enabled, onTerminate, onSnapshot }: UseProctorin
       });
     }
 
+    function initAudioAnalyser(stream: MediaStream) {
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0) return;
+      try {
+        type WindowWithWebkit = Window & {
+          webkitAudioContext?: typeof AudioContext;
+        };
+        const w = window as WindowWithWebkit;
+        const AudioCtor = window.AudioContext ?? w.webkitAudioContext;
+        if (!AudioCtor) return;
+        const ctx = new AudioCtor();
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+        audioContextRef.current = ctx;
+        audioAnalyserRef.current = analyser;
+        audioBufferRef.current = new Float32Array(new ArrayBuffer(analyser.fftSize * 4));
+        audioIntervalRef.current = window.setInterval(sampleAudio, VOICE_SAMPLE_INTERVAL_MS);
+      } catch (err) {
+        console.warn("[proctoring] audio analyser init failed:", err);
+      }
+    }
+
+    function sampleAudio() {
+      const analyser = audioAnalyserRef.current;
+      const buffer = audioBufferRef.current;
+      if (!analyser || !buffer) return;
+      analyser.getFloatTimeDomainData(buffer);
+      let sumSq = 0;
+      for (let i = 0; i < buffer.length; i++) {
+        const v = buffer[i];
+        sumSq += v * v;
+      }
+      const rms = Math.sqrt(sumSq / buffer.length);
+      if (rms >= VOICE_RMS_THRESHOLD) {
+        voiceScoreRef.current = Math.min(VOICE_TRIGGER_SCORE + 4, voiceScoreRef.current + 1);
+        if (voiceScoreRef.current >= VOICE_TRIGGER_SCORE) {
+          emit("voice_detected");
+        }
+      } else if (voiceScoreRef.current > 0) {
+        voiceScoreRef.current -= 1;
+      }
+    }
+
     function captureSnapshot() {
-      if (terminatedRef.current) return;
+      if (stoppedRef.current) return;
       if (snapshotCountRef.current >= MAX_SNAPSHOTS) return;
       const video = videoRef.current;
       if (!video || video.readyState < 2) return;
@@ -221,13 +319,19 @@ export function useProctoring({ enabled, onTerminate, onSnapshot }: UseProctorin
         setFaceCount(count);
 
         if (count > 1) {
-          multiFaceScoreRef.current = Math.min(MULTI_FACE_TRIGGER_SCORE + 2, multiFaceScoreRef.current + 1);
+          multiFaceScoreRef.current = Math.min(
+            MULTI_FACE_TRIGGER_SCORE + 2,
+            multiFaceScoreRef.current + 1
+          );
         } else if (multiFaceScoreRef.current > 0) {
           multiFaceScoreRef.current -= 1;
         }
 
         if (count === 0) {
-          noFaceScoreRef.current = Math.min(NO_FACE_TRIGGER_SCORE + 4, noFaceScoreRef.current + 1);
+          noFaceScoreRef.current = Math.min(
+            NO_FACE_TRIGGER_SCORE + 4,
+            noFaceScoreRef.current + 1
+          );
         } else if (noFaceScoreRef.current > 0) {
           noFaceScoreRef.current -= 1;
         }
@@ -241,14 +345,13 @@ export function useProctoring({ enabled, onTerminate, onSnapshot }: UseProctorin
           return;
         }
       } catch (err) {
-        // Detection failures (occasional WASM hiccups) shouldn't terminate.
         console.warn("[proctoring] detection error:", err);
       }
     }
 
     function runDetectionLoop() {
       const tick = () => {
-        if (terminatedRef.current) return;
+        if (stoppedRef.current) return;
         const now = performance.now();
         if (now - lastDetectAtRef.current >= DETECT_INTERVAL_MS) {
           lastDetectAtRef.current = now;
@@ -272,11 +375,12 @@ export function useProctoring({ enabled, onTerminate, onSnapshot }: UseProctorin
 
     return () => {
       cancelled = true;
+      stoppedRef.current = true;
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("blur", onBlur);
       teardown();
     };
-  }, [enabled]);
+  }, [enabled, teardown]);
 
-  return { videoRef, status, faceCount, detectorReady };
+  return { videoRef, status, faceCount, detectorReady, stop };
 }

@@ -1,17 +1,13 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import BrandLogo from "@/app/components/BrandLogo";
 
 export default function AuthLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-50 text-slate-900">
       <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-8 sm:py-12">
         <header className="flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 text-base font-semibold">
-            <span className="grid h-8 w-8 place-items-center rounded-md bg-indigo-600 text-white">
-              H
-            </span>
-            <span>HireAI</span>
-          </Link>
+          <BrandLogo href="/" size="md" priority imageClassName="h-11 w-auto" />
           <nav className="text-sm text-slate-600">
             <Link href="/login" className="mr-4 hover:text-slate-900">
               Sign in
