@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { extractDescriptor, loadFaceApi } from "@/app/lib/face/faceApi";
+import IdentityPhotoDisplay from "./IdentityPhotoDisplay";
+import IdentityProcessingOverlay, {
+  type IdentityProcessingPhase,
+} from "./IdentityProcessingOverlay";
 
 // Profile-photo uploader: client picks an image OR captures a frame from the
 // webcam, we draw it to a canvas, run face-api.js to verify exactly one face
@@ -244,6 +248,7 @@ export default function ProfilePhotoUploader({ onUploaded }: Props) {
           photoUrl: data.photoUrl ?? "/api/candidate/identity/photo",
           updatedAt: data.updatedAt ?? new Date().toISOString(),
         });
+        setPreviewUrl(null);
         setPhase("done");
         setMode("choose");
         releaseWebcam();
@@ -295,10 +300,16 @@ export default function ProfilePhotoUploader({ onUploaded }: Props) {
     await submitCanvas(video, video.videoWidth, video.videoHeight);
   }, [submitCanvas]);
 
-  const busy = phase === "extracting" || phase === "uploading";
+  const busy =
+    phase === "loading_models" || phase === "extracting" || phase === "uploading";
+  const overlayPhase: IdentityProcessingPhase | null =
+    phase === "loading_models" || phase === "extracting" || phase === "uploading"
+      ? phase
+      : null;
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="relative rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      {overlayPhase && <IdentityProcessingOverlay phase={overlayPhase} />}
       <header className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-base font-semibold text-slate-900">Identity photo</h2>
@@ -316,44 +327,54 @@ export default function ProfilePhotoUploader({ onUploaded }: Props) {
         )}
       </header>
 
-      <div className="mt-5 flex flex-col gap-5 sm:flex-row">
-        {/* ---- Preview / camera column ---- */}
-        <div className="flex-none">
+      <div className="mt-5 flex flex-col gap-6 lg:flex-row lg:items-start">
+        <div className="flex flex-none flex-col items-center gap-2 lg:w-[280px]">
           {mode === "webcam" ? (
-            <div className="relative h-40 w-40 overflow-hidden rounded-xl border border-slate-200 bg-slate-900">
+            <div className="relative aspect-[3/4] w-full max-w-[280px] overflow-hidden rounded-2xl border-2 border-slate-200 bg-slate-900 shadow-inner">
               <video
                 ref={videoRef}
                 autoPlay
                 muted
                 playsInline
-                className="h-full w-full object-cover"
+                className="h-full w-full object-cover object-center -scale-x-100"
               />
               {!webcamReady && (
-                <span className="absolute inset-0 grid place-items-center text-xs text-slate-300">
+                <span className="absolute inset-0 grid place-items-center bg-slate-900/80 text-sm text-slate-200">
                   Starting camera…
                 </span>
               )}
+              <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/50 to-transparent px-3 py-2 text-center text-[10px] font-medium text-white">
+                Center your face in the frame
+              </span>
             </div>
           ) : (
-            <div className="grid h-40 w-40 place-items-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+            <div className="relative aspect-[3/4] w-full max-w-[280px] overflow-hidden rounded-2xl border-2 border-slate-200 bg-slate-50 shadow-inner">
               {previewUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={previewUrl}
                   alt="Selected photo preview"
-                  className="h-full w-full object-cover"
+                  className="h-full w-full object-cover object-center"
                 />
               ) : status?.photoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={`${status.photoUrl}?t=${status.updatedAt ?? ""}`}
+                <IdentityPhotoDisplay
+                  photoUrl={status.photoUrl}
+                  updatedAt={status.updatedAt}
                   alt="Your current identity photo"
-                  className="h-full w-full object-cover"
+                  className="h-full w-full"
+                  mirrored
                 />
               ) : (
-                <span className="text-xs text-slate-400">No photo yet</span>
+                <span className="absolute inset-0 grid place-items-center text-sm text-slate-400">
+                  No photo yet
+                </span>
               )}
             </div>
+          )}
+          {status?.updatedAt && mode !== "webcam" && !previewUrl && (
+            <p className="text-center text-[11px] text-slate-500">
+              Last updated {new Date(status.updatedAt).toLocaleDateString()}
+            </p>
           )}
         </div>
 
@@ -416,16 +437,8 @@ export default function ProfilePhotoUploader({ onUploaded }: Props) {
             </div>
           )}
 
-          {!modelsReady && !error && (
+          {!modelsReady && !error && !busy && (
             <p className="mt-3 text-xs text-slate-500">Preparing face models…</p>
-          )}
-          {phase === "extracting" && (
-            <p className="mt-3 text-xs text-slate-500">
-              Detecting your face and generating the identity descriptor…
-            </p>
-          )}
-          {phase === "uploading" && (
-            <p className="mt-3 text-xs text-slate-500">Saving to your account…</p>
           )}
           {phase === "done" && (
             <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">

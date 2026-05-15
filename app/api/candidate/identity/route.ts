@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
   return Response.json({
     hasDescriptor,
     descriptor: hasDescriptor && includeDescriptor ? user.faceDescriptor : null,
-    photoUrl: user.profilePhotoContentType ? "/api/candidate/identity/photo" : null,
+    photoUrl: user.profilePhotoUpdatedAt ? "/api/candidate/identity/photo" : null,
     updatedAt: user.profilePhotoUpdatedAt ?? null,
   });
 }

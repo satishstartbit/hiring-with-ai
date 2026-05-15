@@ -1,6 +1,7 @@
-import { readSession } from "../../../../lib/auth/session";
-import { connectDB } from "../../../../lib/db/connection";
-import { User } from "../../../../lib/db/models/User";
+import { readSession } from "@/app/lib/auth/session";
+import { bufferFromMongo } from "@/app/lib/db/bufferFromMongo";
+import { connectDB } from "@/app/lib/db/connection";
+import { User } from "@/app/lib/db/models/User";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,20 +25,20 @@ export async function GET() {
     .select("+profilePhotoData profilePhotoContentType profilePhotoUpdatedAt")
     .lean();
 
-  if (!user?.profilePhotoData) {
+  const bytes = bufferFromMongo(user?.profilePhotoData);
+  if (!bytes?.length) {
     return new Response("No profile photo uploaded", { status: 404 });
   }
 
-  const contentType = user.profilePhotoContentType ?? "image/jpeg";
-  // profilePhotoData comes back as a Buffer-like; coerce to a Uint8Array
-  // to satisfy the Response body type without a copy on Node 20+.
-  const body = new Uint8Array(user.profilePhotoData as unknown as Buffer);
+  const rawType = user?.profilePhotoContentType ?? "image/jpeg";
+  const contentType = rawType === "image/jpg" ? "image/jpeg" : rawType;
+  const body = new Uint8Array(bytes);
 
   return new Response(body, {
     status: 200,
     headers: {
       "Content-Type": contentType,
-      "Content-Length": String(body.byteLength),
+      "Content-Length": String(bytes.length),
       // Profile photos are user-private; never let an intermediary cache.
       "Cache-Control": "private, no-store",
     },
