@@ -1,6 +1,6 @@
 import "server-only";
 
-import mongoose, { type FilterQuery } from "mongoose";
+import mongoose, { type QueryFilter } from "mongoose";
 import Candidate, { type ICandidate } from "@/app/lib/db/models/Candidate";
 import InterviewSession from "@/app/lib/db/models/InterviewSession";
 import {
@@ -57,8 +57,8 @@ const PASSED_STAGE_VALUES = QUIZ_PASSED_STAGES;
 function buildFilter(
   jobIds: mongoose.Types.ObjectId[],
   search: string
-): FilterQuery<ICandidate> {
-  const filter: FilterQuery<ICandidate> = {
+): QueryFilter<ICandidate> {
+  const filter: QueryFilter<ICandidate> = {
     jobId: { $in: jobIds },
   };
   if (search) {
@@ -117,10 +117,7 @@ function mapRow(
 }
 
 async function attachInterviewScores(
-  candidates: Array<{
-    interviewSessionId?: mongoose.Types.ObjectId;
-    [key: string]: unknown;
-  }>
+  candidates: Array<{ interviewSessionId?: mongoose.Types.ObjectId | null }>
 ): Promise<Map<string, number | null>> {
   const sessionIds = candidates
     .map((c) => c.interviewSessionId)
@@ -138,7 +135,7 @@ type AggRow = Parameters<typeof mapRow>[0] & {
 };
 
 async function listWithAggregation(
-  filter: FilterQuery<ICandidate>,
+  filter: QueryFilter<ICandidate>,
   sort: "interviewScore" | "passed",
   sortDir: 1 | -1,
   skip: number,
