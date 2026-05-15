@@ -13,6 +13,22 @@ import type * as FaceApiNS from "@vladmandic/face-api";
 
 const MODELS_URL = "/models";
 
+/** face-api re-exports tfjs; bundled typings omit setBackend/ready. */
+interface TfRuntime {
+  setBackend(name: string): Promise<boolean>;
+  ready(): Promise<void>;
+}
+
+async function initTfBackend(tf: TfRuntime): Promise<void> {
+  try {
+    await tf.setBackend("webgl");
+    await tf.ready();
+  } catch {
+    await tf.setBackend("cpu");
+    await tf.ready();
+  }
+}
+
 let _faceapi: typeof FaceApiNS | null = null;
 let _loadPromise: Promise<typeof FaceApiNS> | null = null;
 
@@ -31,13 +47,7 @@ export async function loadFaceApi(): Promise<typeof FaceApiNS> {
     const faceapi = await import("@vladmandic/face-api");
     // Tensorflow backend selection — webgl is fastest on modern browsers;
     // the lib falls back to cpu if webgl init fails (older devices).
-    try {
-      await faceapi.tf.setBackend("webgl");
-      await faceapi.tf.ready();
-    } catch {
-      await faceapi.tf.setBackend("cpu");
-      await faceapi.tf.ready();
-    }
+    await initTfBackend(faceapi.tf as unknown as TfRuntime);
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(MODELS_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(MODELS_URL),
