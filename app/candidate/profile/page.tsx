@@ -126,6 +126,12 @@ export default async function CandidateProfilePage() {
               )}
             </p>
           </div>
+          <Link
+            href="/candidate/profile/identity"
+            className="flex-none rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Identity verification
+          </Link>
         </div>
       </section>
 

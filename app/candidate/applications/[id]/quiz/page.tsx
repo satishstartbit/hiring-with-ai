@@ -5,6 +5,7 @@ import { requireCandidate } from "@/app/lib/auth/dal";
 import { connectDB } from "@/app/lib/db/connection";
 import Candidate from "@/app/lib/db/models/Candidate";
 import QuizClient from "./QuizClient";
+import IdentityVerificationGate from "@/app/components/identity/IdentityVerificationGate";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,9 @@ export default async function QuizPage({
         </p>
       </header>
 
-      <QuizClient applicationId={id} />
+      <IdentityVerificationGate mode="quiz" title="Verify your identity to start the quiz">
+        <QuizClient applicationId={id} />
+      </IdentityVerificationGate>
     </div>
   );
 }

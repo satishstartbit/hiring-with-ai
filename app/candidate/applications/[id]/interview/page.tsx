@@ -5,6 +5,7 @@ import { requireCandidate } from "@/app/lib/auth/dal";
 import { connectDB } from "@/app/lib/db/connection";
 import Candidate from "@/app/lib/db/models/Candidate";
 import InterviewLaunchClient from "./InterviewLaunchClient";
+import IdentityVerificationGate from "@/app/components/identity/IdentityVerificationGate";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +53,15 @@ export default async function InterviewLaunchPage({
         </p>
       </header>
 
-      <InterviewLaunchClient applicationId={id} alreadyInProgress={app.stage === "interview_in_progress"} />
+      <IdentityVerificationGate
+        mode="interview"
+        title="Verify your identity to start the interview"
+      >
+        <InterviewLaunchClient
+          applicationId={id}
+          alreadyInProgress={app.stage === "interview_in_progress"}
+        />
+      </IdentityVerificationGate>
     </div>
   );
 }
