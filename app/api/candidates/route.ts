@@ -1,73 +1,79 @@
 import type { NextRequest } from "next/server";
-import { connectDB } from "../../lib/db/connection";
-import Candidate from "../../lib/db/models/Candidate";
-import InterviewSession from "../../lib/db/models/InterviewSession";
 import mongoose from "mongoose";
+import { readSession } from "@/app/lib/auth/session";
+import { connectDB } from "@/app/lib/db/connection";
+import Job from "@/app/lib/db/models/Job";
+import {
+  listWorkspaceCandidates,
+  parseListParams,
+} from "@/app/lib/candidates/passedCandidatesList";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Workspace-scoped applicants list (all stages) with pagination, search, and sort.
+ * Query: page, limit, q (search), sort, order, jobId (optional filter).
+ */
 export async function GET(request: NextRequest) {
   try {
+    const session = await readSession();
+    if (!session?.userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (!session.workspaceId) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     await connectDB();
     const { searchParams } = request.nextUrl;
+    const { page, limit, search, sort, order } = parseListParams({
+      page: searchParams.get("page") ?? undefined,
+      limit: searchParams.get("limit") ?? undefined,
+      q: searchParams.get("q") ?? searchParams.get("search") ?? undefined,
+      sort: searchParams.get("sort") ?? undefined,
+      order: searchParams.get("order") ?? undefined,
+    });
 
     const jobId = searchParams.get("jobId");
-    const page = parseInt(searchParams.get("page") || "1");
-    const limit = parseInt(searchParams.get("limit") || "10");
-    const search = searchParams.get("search");
-
-    const query: Record<string, unknown> = {};
+    const jobQuery: Record<string, unknown> = { workspaceId: session.workspaceId };
     if (jobId && mongoose.isValidObjectId(jobId)) {
-      query.jobId = new mongoose.Types.ObjectId(jobId);
+      jobQuery._id = new mongoose.Types.ObjectId(jobId);
     }
 
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
-      ];
+    const jobs = await Job.find(jobQuery).select("_id").lean();
+    const jobIds = jobs.map((j) => j._id);
+
+    if (jobIds.length === 0) {
+      return Response.json({
+        candidates: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 1,
+        sort,
+        order,
+        search,
+      });
     }
 
-    const skip = (page - 1) * limit;
-
-    const [rawCandidates, total] = await Promise.all([
-      Candidate.find(query)
-        .select("-resumeData")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      Candidate.countDocuments(query),
-    ]);
-
-    // Attach highest completed interview score for each candidate
-    type LeanSession = { candidateId: mongoose.Types.ObjectId; totalScore?: number };
-    const ids = rawCandidates.map((c) => (c as { _id: mongoose.Types.ObjectId })._id);
-    const sessions = (await InterviewSession.find({
-      candidateId: { $in: ids },
-      status: "completed",
-    })
-      .select("candidateId totalScore")
-      .lean()) as unknown as LeanSession[];
-
-    const scoreMap = new Map<string, number>();
-    for (const s of sessions) {
-      if (s.totalScore === undefined) continue;
-      const cid = s.candidateId.toString();
-      const existing = scoreMap.get(cid);
-      if (existing === undefined || s.totalScore > existing) scoreMap.set(cid, s.totalScore);
-    }
-
-    const candidates = rawCandidates.map((c) => {
-      const cid = (c as { _id: mongoose.Types.ObjectId })._id.toString();
-      return { ...c, interviewScore: scoreMap.get(cid) };
+    const result = await listWorkspaceCandidates({
+      jobIds,
+      page,
+      limit,
+      search,
+      sort,
+      order,
     });
 
     return Response.json({
-      candidates,
-      total,
-      page,
-      totalPages: Math.ceil(total / limit),
+      candidates: result.candidates,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      sort: result.sort,
+      order: result.order,
+      search: result.search,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error";
