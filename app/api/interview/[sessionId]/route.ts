@@ -25,17 +25,23 @@ export async function GET(
     .select("resumeMatchScore answerScore")
     .lean()) as { resumeMatchScore?: number; answerScore?: number } | null;
 
-  // Pull the anti-cheat slice of the AssessmentConfig so the UI can decide
-  // whether to enable camera proctoring + fullscreen during the interview.
+  // Pull the anti-cheat + AI-interview slices of the AssessmentConfig so the
+  // UI can decide whether to enable camera proctoring + fullscreen during the
+  // interview and show the configured duration / passing score.
   // The same config drives the quiz round — single source of truth for HR.
   const assessmentConfig = await AssessmentConfig.findOne({ jobId: session.jobId })
-    .select("antiCheat")
+    .select("antiCheat interview")
     .lean();
   const antiCheat = {
     tabSwitchDetection: assessmentConfig?.antiCheat?.tabSwitchDetection ?? true,
     blockCopyPaste: assessmentConfig?.antiCheat?.blockCopyPaste ?? false,
     fullscreenRequired: assessmentConfig?.antiCheat?.fullscreenRequired ?? false,
     webcamMonitoring: assessmentConfig?.antiCheat?.webcamMonitoring ?? false,
+    maxViolations: assessmentConfig?.antiCheat?.maxViolations ?? 3,
+  };
+  const interviewConfig = {
+    durationMinutes: assessmentConfig?.interview?.durationMinutes ?? 15,
+    passingScore: assessmentConfig?.interview?.passingScore ?? 20,
   };
 
   return Response.json({
@@ -68,5 +74,6 @@ export async function GET(
     resumeMatchScore: candidate?.resumeMatchScore,
     answerScore: candidate?.answerScore,
     antiCheat,
+    interviewConfig,
   });
 }

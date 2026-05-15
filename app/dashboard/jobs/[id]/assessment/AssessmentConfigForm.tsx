@@ -6,10 +6,12 @@ import {
   DIFFICULTY_LEVELS,
   QUESTION_TYPES,
   CODING_LANGUAGES,
+  INTERVIEW_TOPICS,
   type DifficultyLevel,
   type QuestionType,
   type CodingLanguage,
   type QuestionCountMode,
+  type InterviewTopic,
 } from "@/app/lib/constants/assessment";
 
 export type InitialConfig = {
@@ -36,6 +38,15 @@ export type InitialConfig = {
     languages: CodingLanguage[];
     timeoutSeconds: number;
     enableQualityAnalysis: boolean;
+  };
+  interview: {
+    durationMinutes: number;
+    questionCount: number;
+    topics: InterviewTopic[];
+    difficulty: DifficultyLevel;
+    passingScore: number;
+    allowFollowups: boolean;
+    adaptiveDifficulty: boolean;
   };
   isPublished: boolean;
 };
@@ -64,6 +75,23 @@ const QUESTION_TYPE_META: Record<QuestionType, { label: string; hint: string }> 
 
 const DURATION_PRESETS = [15, 30, 45, 60];
 const COUNT_PRESETS = [10, 20, 30];
+
+const INTERVIEW_DURATION_PRESETS = [10, 15, 30, 45];
+const INTERVIEW_COUNT_PRESETS = [6, 8, 10, 12];
+
+const INTERVIEW_TOPIC_META: Record<InterviewTopic, { label: string; hint: string }> = {
+  introduction: { label: "Introduction", hint: "Warm-up question about background." },
+  contextual: { label: "Contextual", hint: "Probes recent projects and decisions." },
+  technical: { label: "Technical", hint: "Core engineering knowledge questions." },
+  scenario: { label: "Scenario", hint: "Real-world judgement problems." },
+  system_design: { label: "System design", hint: "Scale + trade-off design problems." },
+  debugging: { label: "Debugging", hint: "Diagnose a failing service / code path." },
+  communication: { label: "Communication", hint: "Explain a complex idea simply." },
+  behavioral: { label: "Behavioral", hint: "Past experiences and reactions." },
+  leadership: { label: "Leadership", hint: "Influence, mentoring, ownership." },
+  sql: { label: "SQL", hint: "Query design over a sample schema." },
+  architecture: { label: "Architecture", hint: "Choices across modules + tech stack." },
+};
 
 const SKILL_SUGGESTIONS = [
   "React",
@@ -650,6 +678,226 @@ export default function AssessmentConfigForm({
           </div>
         </Section>
       )}
+
+      {/* AI INTERVIEW — drives the LangGraph planner that runs after the quiz */}
+      <Section
+        title="AI interview"
+        description="The voice/video interview candidates take after passing the quiz. These settings shape the planner: topic mix, question count, difficulty, and pass threshold."
+      >
+        <div className="grid gap-6 sm:grid-cols-2">
+          <div>
+            <Label>Target duration (minutes)</Label>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {INTERVIEW_DURATION_PRESETS.map((m) => (
+                <PresetPill
+                  key={m}
+                  active={cfg.interview.durationMinutes === m}
+                  onClick={() =>
+                    patch("interview", { ...cfg.interview, durationMinutes: m })
+                  }
+                >
+                  {m} min
+                </PresetPill>
+              ))}
+              <input
+                type="number"
+                min={1}
+                max={120}
+                value={cfg.interview.durationMinutes}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "") return;
+                  patch("interview", {
+                    ...cfg.interview,
+                    durationMinutes: Number(v),
+                  });
+                }}
+                onBlur={(e) => {
+                  const n = Number(e.target.value) || 15;
+                  patch("interview", {
+                    ...cfg.interview,
+                    durationMinutes: Math.max(1, Math.min(120, n)),
+                  });
+                }}
+                className="w-24 rounded-md border border-slate-300 px-2 py-1 text-sm"
+              />
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              Shown to candidates on the launch screen. Soft target — the AI may
+              end slightly earlier if the candidate clearly aces it.
+            </p>
+          </div>
+
+          <div>
+            <Label>Number of questions</Label>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {INTERVIEW_COUNT_PRESETS.map((c) => (
+                <PresetPill
+                  key={c}
+                  active={cfg.interview.questionCount === c}
+                  onClick={() =>
+                    patch("interview", { ...cfg.interview, questionCount: c })
+                  }
+                >
+                  {c}
+                </PresetPill>
+              ))}
+              <input
+                type="number"
+                min={4}
+                max={15}
+                value={cfg.interview.questionCount}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "") return;
+                  patch("interview", {
+                    ...cfg.interview,
+                    questionCount: Number(v),
+                  });
+                }}
+                onBlur={(e) => {
+                  const n = Number(e.target.value) || 8;
+                  patch("interview", {
+                    ...cfg.interview,
+                    questionCount: Math.max(4, Math.min(15, n)),
+                  });
+                }}
+                className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm"
+              />
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              Total questions across all topics (4-15). Includes the intro.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <Label>Baseline difficulty</Label>
+          <p className="text-xs text-slate-500">
+            The planner starts here. Per-question difficulty can still drift if
+            adaptive difficulty is on below.
+          </p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {DIFFICULTY_LEVELS.map((d) => {
+              const active = cfg.interview.difficulty === d;
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() =>
+                    patch("interview", { ...cfg.interview, difficulty: d })
+                  }
+                  className={`rounded-lg border p-3 text-left transition ${
+                    active
+                      ? "border-indigo-500 bg-indigo-50/60 ring-2 ring-indigo-200"
+                      : "border-slate-200 bg-white hover:border-slate-300"
+                  }`}
+                >
+                  <div className="text-sm font-medium text-slate-900">
+                    {DIFFICULTY_META[d].label}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {DIFFICULTY_META[d].hint}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <Label>Topics</Label>
+          <p className="text-xs text-slate-500">
+            The planner draws the question mix from these. Pick at least one;
+            leave the intro on for a warm opener.
+          </p>
+          {cfg.interview.topics.length === 0 && (
+            <p className="mt-2 text-xs font-medium text-rose-600">
+              Pick at least one topic — the AI interview won&apos;t save without one.
+            </p>
+          )}
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {INTERVIEW_TOPICS.map((t) => {
+              const active = cfg.interview.topics.includes(t);
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() =>
+                    patch("interview", {
+                      ...cfg.interview,
+                      topics: active
+                        ? cfg.interview.topics.filter((x) => x !== t)
+                        : [...cfg.interview.topics, t],
+                    })
+                  }
+                  className={`flex items-start justify-between gap-3 rounded-lg border p-3 text-left transition ${
+                    active
+                      ? "border-indigo-500 bg-indigo-50/60"
+                      : "border-slate-200 bg-white hover:border-slate-300"
+                  }`}
+                >
+                  <div>
+                    <div className="text-sm font-medium text-slate-900">
+                      {INTERVIEW_TOPIC_META[t].label}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {INTERVIEW_TOPIC_META[t].hint}
+                    </p>
+                  </div>
+                  <Checkbox checked={active} readOnly />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-6 sm:grid-cols-2">
+          <div>
+            <Label>Passing score</Label>
+            <div className="mt-2 flex items-center gap-3">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={cfg.interview.passingScore}
+                onChange={(e) =>
+                  patch("interview", {
+                    ...cfg.interview,
+                    passingScore: Number(e.target.value),
+                  })
+                }
+                className="flex-1 accent-indigo-600"
+              />
+              <span className="w-12 text-right text-sm font-semibold text-slate-900">
+                {cfg.interview.passingScore}/100
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              Final 0-100 score the candidate must beat to be marked as passed.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <Toggle
+              label="Allow follow-up questions"
+              hint="AI can drill deeper on a shallow answer instead of advancing."
+              checked={cfg.interview.allowFollowups}
+              onChange={(v) =>
+                patch("interview", { ...cfg.interview, allowFollowups: v })
+              }
+            />
+            <Toggle
+              label="Adaptive difficulty"
+              hint="Difficulty shifts mid-interview based on answer quality."
+              checked={cfg.interview.adaptiveDifficulty}
+              onChange={(v) =>
+                patch("interview", { ...cfg.interview, adaptiveDifficulty: v })
+              }
+            />
+          </div>
+        </div>
+      </Section>
 
       {/* ACTIONS */}
       <div className="sticky bottom-0 -mx-4 flex items-center justify-between gap-3 border-t border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-lg sm:px-5">

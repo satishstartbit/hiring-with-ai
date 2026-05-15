@@ -4,10 +4,12 @@ import {
   QUESTION_TYPES,
   CODING_LANGUAGES,
   QUESTION_COUNT_MODES,
+  INTERVIEW_TOPICS,
   type DifficultyLevel,
   type QuestionType,
   type CodingLanguage,
   type QuestionCountMode,
+  type InterviewTopic,
 } from "../../constants/assessment";
 
 // Re-export so existing model imports (Assessment.ts, CandidateAnswer.ts, etc.) keep working.
@@ -16,8 +18,15 @@ export {
   QUESTION_TYPES,
   CODING_LANGUAGES,
   QUESTION_COUNT_MODES,
+  INTERVIEW_TOPICS,
 };
-export type { DifficultyLevel, QuestionType, CodingLanguage, QuestionCountMode };
+export type {
+  DifficultyLevel,
+  QuestionType,
+  CodingLanguage,
+  QuestionCountMode,
+  InterviewTopic,
+};
 
 export interface ISectionMinimum {
   /** A QuestionType — required so HR can require, e.g., a 60% minimum in `coding`. */
@@ -51,6 +60,23 @@ export interface ICodingSettings {
   enableQualityAnalysis: boolean;
 }
 
+export interface IInterviewSettings {
+  /** Target wall-clock budget for the AI interview, shown to the candidate. */
+  durationMinutes: number;
+  /** Total questions the planner will produce (clamped at 4-15 server-side). */
+  questionCount: number;
+  /** Topic mix the planner will draw from. Empty array = planner picks. */
+  topics: InterviewTopic[];
+  /** Baseline difficulty handed to the planner. */
+  difficulty: DifficultyLevel;
+  /** Minimum 0-100 score to pass the AI interview. */
+  passingScore: number;
+  /** When false, the evaluator's "followup" hints are downgraded to "advance". */
+  allowFollowups: boolean;
+  /** When false, "harder"/"easier"/"switch_topic" routing is clamped to "advance". */
+  adaptiveDifficulty: boolean;
+}
+
 export interface IAssessmentConfig extends Document {
   jobId: mongoose.Types.ObjectId;
   workspaceId: mongoose.Types.ObjectId;
@@ -67,6 +93,7 @@ export interface IAssessmentConfig extends Document {
   passingCriteria: IPassingCriteria;
   antiCheat: IAntiCheatSettings;
   coding: ICodingSettings;
+  interview: IInterviewSettings;
 
   /** True once HR has saved a complete config and assessment can be served to candidates. */
   isPublished: boolean;
@@ -119,6 +146,22 @@ const CodingSettingsSchema = new Schema<ICodingSettings>(
   { _id: false }
 );
 
+const InterviewSettingsSchema = new Schema<IInterviewSettings>(
+  {
+    durationMinutes: { type: Number, default: 15, min: 1, max: 120 },
+    questionCount: { type: Number, default: 8, min: 4, max: 15 },
+    topics: {
+      type: [{ type: String, enum: INTERVIEW_TOPICS }],
+      default: ["introduction", "technical", "scenario", "behavioral"],
+    },
+    difficulty: { type: String, enum: DIFFICULTY_LEVELS, default: "medium" },
+    passingScore: { type: Number, default: 20, min: 0, max: 100 },
+    allowFollowups: { type: Boolean, default: true },
+    adaptiveDifficulty: { type: Boolean, default: true },
+  },
+  { _id: false }
+);
+
 const AssessmentConfigSchema = new Schema<IAssessmentConfig>(
   {
     jobId: { type: Schema.Types.ObjectId, ref: "Job", required: true, unique: true },
@@ -138,6 +181,7 @@ const AssessmentConfigSchema = new Schema<IAssessmentConfig>(
     passingCriteria: { type: PassingCriteriaSchema, default: () => ({}) },
     antiCheat: { type: AntiCheatSchema, default: () => ({}) },
     coding: { type: CodingSettingsSchema, default: () => ({}) },
+    interview: { type: InterviewSettingsSchema, default: () => ({}) },
 
     isPublished: { type: Boolean, default: false },
     publishedAt: { type: Date },
@@ -150,6 +194,14 @@ const AssessmentConfigSchema = new Schema<IAssessmentConfig>(
 
 AssessmentConfigSchema.index({ workspaceId: 1, jobId: 1 });
 AssessmentConfigSchema.index({ companyId: 1 });
+
+// Drop the cached compiled model in dev so schema edits hot-reload cleanly.
+// Without this, adding new fields (e.g. `interview`) leaves the previously
+// compiled model in `mongoose.models`, which silently strips unknown fields
+// on save and returns `undefined` on read — masking config-driven behavior.
+if (process.env.NODE_ENV !== "production" && mongoose.models.AssessmentConfig) {
+  mongoose.deleteModel("AssessmentConfig");
+}
 
 const AssessmentConfig: Model<IAssessmentConfig> =
   mongoose.models.AssessmentConfig ||

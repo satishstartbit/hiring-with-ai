@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { connectDB } from "../../../../lib/db/connection";
 import InterviewSession from "../../../../lib/db/models/InterviewSession";
 import Candidate from "../../../../lib/db/models/Candidate";
+import AssessmentConfig from "../../../../lib/db/models/AssessmentConfig";
 import AIReport from "../../../../lib/db/models/AIReport";
 import { runGradeInterview } from "../../../../lib/workflow/interviewGraph";
 import { sendInterviewResultEmail } from "../../../../lib/email";
@@ -122,8 +123,19 @@ export async function POST(
     }
   }
 
+  // Pass/fail honors the HR-configured passing score when set, otherwise the
+  // fallback constant in `interviewConfig.ts`.
+  const cfg = await AssessmentConfig.findOne({ jobId: session.jobId })
+    .select("interview.passingScore")
+    .lean();
+  const configuredPass = cfg?.interview?.passingScore;
+  const passed =
+    typeof configuredPass === "number"
+      ? result.overallScore >= configuredPass
+      : isInterviewPassed(result.overallScore);
+
   await Candidate.findByIdAndUpdate(session.candidateId, {
-    status: isInterviewPassed(result.overallScore) ? "offer" : "reviewing",
+    status: passed ? "offer" : "reviewing",
     stage: "completed",
   });
 

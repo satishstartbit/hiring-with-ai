@@ -104,6 +104,22 @@ export interface InterviewPlan {
   totalQuestions: number;
 }
 
+/**
+ * Per-job AI-interview tuning sourced from `AssessmentConfig.interview`.
+ * Passed in at start-time so the LangGraph nodes can shape the plan,
+ * follow-up routing, and difficulty drift dynamically per job.
+ */
+export interface InterviewSettings {
+  durationMinutes: number;
+  questionCount: number;
+  topics: QuestionType[];
+  /** "adaptive" leaves the heuristic intact; others pin the baseline. */
+  difficulty: "easy" | "medium" | "hard" | "adaptive";
+  passingScore: number;
+  allowFollowups: boolean;
+  adaptiveDifficulty: boolean;
+}
+
 export interface FinalReport {
   passed: boolean;
   recommendation:
@@ -148,6 +164,12 @@ export const InterviewStateAnnotation = Annotation.Root({
   skillMatch: Annotation<SkillMatch | null>({ reducer: last, default: () => null }),
   strongSkills: Annotation<string[]>({ reducer: last, default: () => [] }),
   weakSkills: Annotation<string[]>({ reducer: last, default: () => [] }),
+
+  // ── per-job tuning (set at start, immutable for the run) ──
+  interviewSettings: Annotation<InterviewSettings | null>({
+    reducer: last,
+    default: () => null,
+  }),
 
   // ── plan (node 3) ──
   plan: Annotation<InterviewPlan | null>({ reducer: last, default: () => null }),

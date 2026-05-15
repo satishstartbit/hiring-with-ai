@@ -4,6 +4,7 @@ import {
   QUESTION_TYPES,
   CODING_LANGUAGES,
   QUESTION_COUNT_MODES,
+  INTERVIEW_TOPICS,
 } from "../db/models/AssessmentConfig";
 
 const SectionMinimumSchema = z.object({
@@ -32,6 +33,20 @@ const CodingSettingsSchema = z.object({
   enableQualityAnalysis: z.boolean().default(true),
 });
 
+const InterviewSettingsSchema = z.object({
+  durationMinutes: z.coerce.number().int().min(1).max(120).default(15),
+  questionCount: z.coerce.number().int().min(4).max(15).default(8),
+  topics: z
+    .array(z.enum(INTERVIEW_TOPICS))
+    .min(1, "Pick at least one interview topic")
+    .max(INTERVIEW_TOPICS.length)
+    .default(["introduction", "technical", "scenario", "behavioral"]),
+  difficulty: z.enum(DIFFICULTY_LEVELS).default("medium"),
+  passingScore: z.coerce.number().int().min(0).max(100).default(20),
+  allowFollowups: z.boolean().default(true),
+  adaptiveDifficulty: z.boolean().default(true),
+});
+
 export const AssessmentConfigUpsertSchema = z
   .object({
     difficulty: z.enum(DIFFICULTY_LEVELS).default("medium"),
@@ -46,6 +61,7 @@ export const AssessmentConfigUpsertSchema = z
     passingCriteria: PassingCriteriaSchema,
     antiCheat: AntiCheatSchema,
     coding: CodingSettingsSchema,
+    interview: InterviewSettingsSchema,
     isPublished: z.boolean().optional(),
   })
   .superRefine((cfg, ctx) => {

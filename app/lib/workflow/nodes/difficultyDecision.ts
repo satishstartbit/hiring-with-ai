@@ -30,6 +30,12 @@ export const difficultyDecisionNode = traceable(
     if (nextIdx >= state.questions.length) {
       return { currentStage: "decided_advance" };
     }
+    // HR pinned the difficulty curve — skip adaptive question swaps entirely.
+    // Belt-and-braces: answerEvaluation should already downgrade these to
+    // "advance", but if it slipped through we no-op here.
+    if (state.interviewSettings?.adaptiveDifficulty === false) {
+      return { currentStage: "decided_advance" };
+    }
 
     const nextSlot = state.questions[nextIdx];
     const direction: "up" | "down" =

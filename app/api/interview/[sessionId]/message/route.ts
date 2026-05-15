@@ -2,12 +2,14 @@ import type { NextRequest } from "next/server";
 import mongoose from "mongoose";
 import { connectDB } from "../../../../lib/db/connection";
 import InterviewSession from "../../../../lib/db/models/InterviewSession";
+import AssessmentConfig from "../../../../lib/db/models/AssessmentConfig";
 import { runSendMessage } from "../../../../lib/workflow/interviewGraph";
 import {
   ZERO_SCORES,
   type PlannedQuestion,
   type QuestionType,
   type Difficulty,
+  type InterviewSettings,
 } from "../../../../lib/workflow/interviewState";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +52,29 @@ export async function POST(
         generatedAdaptively: false,
       }));
 
+  // Re-load per-job AI-interview settings so allowFollowups + adaptiveDifficulty
+  // are enforced on every candidate turn, not just at planning time.
+  const assessmentConfig = await AssessmentConfig.findOne({ jobId: session.jobId })
+    .select("interview")
+    .lean();
+  const interviewSettings: InterviewSettings | null = assessmentConfig?.interview
+    ? {
+        durationMinutes: assessmentConfig.interview.durationMinutes ?? 15,
+        questionCount: assessmentConfig.interview.questionCount ?? 8,
+        topics:
+          (assessmentConfig.interview.topics as QuestionType[]) ?? [
+            "introduction",
+            "technical",
+            "scenario",
+            "behavioral",
+          ],
+        difficulty: assessmentConfig.interview.difficulty ?? "medium",
+        passingScore: assessmentConfig.interview.passingScore ?? 20,
+        allowFollowups: assessmentConfig.interview.allowFollowups ?? true,
+        adaptiveDifficulty: assessmentConfig.interview.adaptiveDifficulty ?? true,
+      }
+    : null;
+
   const result = await runSendMessage({
     candidateId: session.candidateId.toString(),
     jobId: session.jobId.toString(),
@@ -72,6 +97,7 @@ export async function POST(
     evaluations: session.evaluations ?? [],
     runningScores: session.dimensionScores ?? { ...ZERO_SCORES },
     userMessage: message.trim(),
+    interviewSettings,
   });
 
   if (result.error) {

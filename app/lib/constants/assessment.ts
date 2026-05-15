@@ -26,3 +26,21 @@ export type CodingLanguage = (typeof CODING_LANGUAGES)[number];
 
 export const QUESTION_COUNT_MODES = ["fixed", "dynamic"] as const;
 export type QuestionCountMode = (typeof QUESTION_COUNT_MODES)[number];
+
+// AI interview question types — distinct from the quiz `QUESTION_TYPES`.
+// Mirrors the union used inside the LangGraph state (interviewState.ts) so
+// HR can shape the interview plan the planner generates.
+export const INTERVIEW_TOPICS = [
+  "introduction",
+  "contextual",
+  "technical",
+  "scenario",
+  "system_design",
+  "debugging",
+  "communication",
+  "behavioral",
+  "leadership",
+  "sql",
+  "architecture",
+] as const;
+export type InterviewTopic = (typeof INTERVIEW_TOPICS)[number];

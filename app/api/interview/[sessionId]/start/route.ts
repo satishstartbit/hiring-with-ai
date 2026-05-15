@@ -3,8 +3,11 @@ import mongoose from "mongoose";
 import { connectDB } from "../../../../lib/db/connection";
 import InterviewSession from "../../../../lib/db/models/InterviewSession";
 import Candidate from "../../../../lib/db/models/Candidate";
+import AssessmentConfig from "../../../../lib/db/models/AssessmentConfig";
 import { runStartInterview } from "../../../../lib/workflow/interviewGraph";
 import { extractResumeText } from "../../../../lib/ai/resumeText";
+import type { InterviewSettings } from "../../../../lib/workflow/interviewState";
+import type { QuestionType } from "../../../../lib/workflow/interviewState";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +48,31 @@ export async function POST(
     }
   );
 
+  // Pull the AI-interview slice of the AssessmentConfig — drives the planner's
+  // topic mix, question count, difficulty baseline, and adaptive toggles. If
+  // HR hasn't configured the job yet, omit and the planner falls back to its
+  // resume-driven heuristic plan.
+  const assessmentConfig = await AssessmentConfig.findOne({ jobId: session.jobId })
+    .select("interview")
+    .lean();
+  const interviewSettings: InterviewSettings | null = assessmentConfig?.interview
+    ? {
+        durationMinutes: assessmentConfig.interview.durationMinutes ?? 15,
+        questionCount: assessmentConfig.interview.questionCount ?? 8,
+        topics:
+          (assessmentConfig.interview.topics as QuestionType[]) ?? [
+            "introduction",
+            "technical",
+            "scenario",
+            "behavioral",
+          ],
+        difficulty: assessmentConfig.interview.difficulty ?? "medium",
+        passingScore: assessmentConfig.interview.passingScore ?? 20,
+        allowFollowups: assessmentConfig.interview.allowFollowups ?? true,
+        adaptiveDifficulty: assessmentConfig.interview.adaptiveDifficulty ?? true,
+      }
+    : null;
+
   const result = await runStartInterview({
     candidateId: session.candidateId.toString(),
     jobId: session.jobId.toString(),
@@ -54,6 +82,7 @@ export async function POST(
     jobRequirements: session.jobRequirements,
     candidateName: session.candidateName,
     resumeText,
+    interviewSettings,
   });
 
   if (result.error) {

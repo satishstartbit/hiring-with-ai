@@ -34,6 +34,15 @@ const DEFAULT_CONFIG: InitialConfig = {
     timeoutSeconds: 10,
     enableQualityAnalysis: true,
   },
+  interview: {
+    durationMinutes: 15,
+    questionCount: 8,
+    topics: ["introduction", "technical", "scenario", "behavioral"],
+    difficulty: "medium",
+    passingScore: 20,
+    allowFollowups: true,
+    adaptiveDifficulty: true,
+  },
   isPublished: false,
 };
 
@@ -78,6 +87,17 @@ export default async function AssessmentConfigPage({
           languages: existing.coding?.languages ?? ["javascript", "python"],
           timeoutSeconds: existing.coding?.timeoutSeconds ?? 10,
           enableQualityAnalysis: existing.coding?.enableQualityAnalysis ?? true,
+        },
+        interview: {
+          durationMinutes: existing.interview?.durationMinutes ?? 15,
+          questionCount: existing.interview?.questionCount ?? 8,
+          topics:
+            existing.interview?.topics ??
+            ["introduction", "technical", "scenario", "behavioral"],
+          difficulty: existing.interview?.difficulty ?? "medium",
+          passingScore: existing.interview?.passingScore ?? 20,
+          allowFollowups: existing.interview?.allowFollowups ?? true,
+          adaptiveDifficulty: existing.interview?.adaptiveDifficulty ?? true,
         },
         isPublished: existing.isPublished,
       }

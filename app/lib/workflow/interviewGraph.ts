@@ -7,6 +7,7 @@ import {
   type DimensionScores,
   type FinalReport,
   type PlannedQuestion,
+  type InterviewSettings,
 } from "./interviewState";
 import { resumeAnalysisNode } from "./nodes/resumeAnalysis";
 import { skillExtractionNode } from "./nodes/skillExtraction";
@@ -97,6 +98,8 @@ export interface StartInterviewInput {
   jobRequirements: string[];
   candidateName: string;
   resumeText: string;
+  /** Per-job tuning. When omitted the planner falls back to its heuristics. */
+  interviewSettings?: InterviewSettings | null;
 }
 
 export interface StartInterviewOutput {
@@ -123,6 +126,7 @@ export const runStartInterview = traceable(
       jobRequirements: input.jobRequirements,
       candidateName: input.candidateName,
       resumeText: input.resumeText,
+      interviewSettings: input.interviewSettings ?? null,
     });
     return {
       questions: state.questions,
@@ -159,6 +163,8 @@ export interface SendMessageInput {
   evaluations: InterviewState["evaluations"];
   runningScores: DimensionScores;
   userMessage: string;
+  /** Re-supplied per turn so adaptive toggles stay enforced. */
+  interviewSettings?: InterviewSettings | null;
 }
 
 export interface SendMessageOutput {
@@ -195,6 +201,7 @@ export const runSendMessage = traceable(
       evaluations: input.evaluations,
       runningScores: input.runningScores,
       userMessage: input.userMessage,
+      interviewSettings: input.interviewSettings ?? null,
     });
     return {
       aiReply: state.aiReply,

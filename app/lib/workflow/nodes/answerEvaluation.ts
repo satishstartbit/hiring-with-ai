@@ -162,6 +162,25 @@ export const answerEvaluationNode = traceable(
         let nextAction = parsed.nextAction;
         if (isLast && nextAction !== "complete") nextAction = "complete";
 
+        // Honor HR-configured toggles. allowFollowups=false → no drill-downs.
+        // adaptiveDifficulty=false → no harder/easier/switch_topic detours.
+        // Both downgrade to "advance" so the interview marches through the
+        // fixed plan exactly as configured.
+        const settings = state.interviewSettings;
+        if (settings) {
+          if (!settings.allowFollowups && nextAction === "followup") {
+            nextAction = "advance";
+          }
+          if (
+            !settings.adaptiveDifficulty &&
+            (nextAction === "harder" ||
+              nextAction === "easier" ||
+              nextAction === "switch_topic")
+          ) {
+            nextAction = "advance";
+          }
+        }
+
         evaluation = {
           scores,
           reasoning: parsed.reasoning,

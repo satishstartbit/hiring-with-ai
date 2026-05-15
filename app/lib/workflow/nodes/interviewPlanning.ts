@@ -8,10 +8,13 @@ import {
   type Difficulty,
   type InterviewPlan,
   type InterviewState,
+  type QuestionType,
 } from "../interviewState";
 
-const MIN_QUESTIONS = 6;
-const MAX_QUESTIONS = 12;
+// Hard floor / ceiling regardless of HR config — keeps the LLM honest and
+// prevents pathological 1-question or 50-question interviews.
+const MIN_QUESTIONS = 4;
+const MAX_QUESTIONS = 15;
 
 const PlanSchema = z.object({
   sections: z
@@ -25,6 +28,39 @@ const PlanSchema = z.object({
   startingDifficulty: z.enum(["easy", "medium", "hard"]),
   totalQuestions: z.number().int().min(MIN_QUESTIONS).max(MAX_QUESTIONS),
 });
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+/** Distribute `total` slots across `topics`, intro first if present. */
+function distributeSections(
+  topics: QuestionType[],
+  total: number
+): { type: QuestionType; count: number }[] {
+  if (topics.length === 0) return [];
+  const out: { type: QuestionType; count: number }[] = [];
+  const hasIntro = topics.includes("introduction");
+  const rest = topics.filter((t) => t !== "introduction");
+  let remaining = total;
+  if (hasIntro && remaining > 0) {
+    out.push({ type: "introduction", count: 1 });
+    remaining -= 1;
+  }
+  if (rest.length === 0) {
+    // Only intro requested — pad to `remaining` with a sensible fallback.
+    if (remaining > 0) out.push({ type: "technical", count: remaining });
+    return out;
+  }
+  const base = Math.floor(remaining / rest.length);
+  let extra = remaining - base * rest.length;
+  for (const t of rest) {
+    const count = base + (extra > 0 ? 1 : 0);
+    if (extra > 0) extra -= 1;
+    if (count > 0) out.push({ type: t, count });
+  }
+  return out;
+}
 
 /**
  * Build the interview roadmap. Returns 6-12 sections, each with a type and
@@ -50,6 +86,45 @@ export const interviewPlanningNode = traceable(
           : matchPercent >= 50
           ? "medium"
           : "easy";
+
+      // HR-config fast path — when the recruiter has any per-job tuning we
+      // skip the LLM planner entirely and build a deterministic plan so the
+      // configured questionCount + topic mix are honored exactly. If topics
+      // were left blank (legacy configs only — the form now requires ≥1) we
+      // fall back to a sensible default mix instead of dropping to the LLM
+      // path, which would otherwise pick its own count and silently override
+      // the HR setting.
+      // Difficulty: "adaptive" defers to the resume heuristic; anything else
+      // pins the baseline.
+      const settings = state.interviewSettings;
+      if (settings) {
+        const topics =
+          settings.topics.length > 0
+            ? settings.topics
+            : (["introduction", "technical", "scenario", "behavioral"] as const);
+        const totalQuestions = clamp(
+          settings.questionCount,
+          MIN_QUESTIONS,
+          MAX_QUESTIONS
+        );
+        const sections = distributeSections([...topics], totalQuestions);
+        const baselineDifficulty: Difficulty =
+          settings.difficulty === "adaptive"
+            ? heuristicDifficulty
+            : settings.difficulty;
+
+        const plan: InterviewPlan = {
+          sections,
+          startingDifficulty: baselineDifficulty,
+          totalQuestions,
+        };
+
+        return {
+          plan,
+          currentDifficulty: plan.startingDifficulty,
+          currentStage: "planned",
+        };
+      }
 
       const llm = createLLM({ temperature: 0.3, maxTokens: 800 });
       const result = await llm.invoke([

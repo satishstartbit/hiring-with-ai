@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   INTERVIEW_PASSING_SCORE,
   INTERVIEW_QUESTION_COUNT,
-  isInterviewPassed,
 } from "../lib/interviewConfig";
 import {
   useProctoring,
@@ -61,6 +60,12 @@ interface SessionAntiCheat {
   blockCopyPaste: boolean;
   fullscreenRequired: boolean;
   webcamMonitoring: boolean;
+  maxViolations: number;
+}
+
+interface SessionInterviewConfig {
+  durationMinutes: number;
+  passingScore: number;
 }
 
 interface SessionData {
@@ -80,6 +85,7 @@ interface SessionData {
   resumeMatchScore?: number;
   answerScore?: number;
   antiCheat?: SessionAntiCheat;
+  interviewConfig?: SessionInterviewConfig;
 }
 
 interface SlotDay {
@@ -97,6 +103,20 @@ interface InterviewResult {
 
 const SILENCE_TIMEOUT_MS = 2500;
 const MIN_WORDS = 10;
+
+// Mirrors the quiz round's violation copy so candidates see consistent
+// language across the two assessment stages.
+const VIOLATION_MESSAGES: Record<ProctoringViolation, string> = {
+  camera_denied: "Camera access was denied. The interview cannot continue without it.",
+  camera_lost: "Camera was disconnected. The interview cannot continue without it.",
+  tab_switch: "You switched away from the interview tab.",
+  window_blur: "You moved focus away from the interview window.",
+  multi_face: "More than one person was detected in front of the camera.",
+  no_face: "We can't see you in the camera. Please stay in frame.",
+  voice_detected: "Background voices were detected. Please be in a quiet space.",
+  fullscreen_exit: "You exited fullscreen mode. Fullscreen is required for this interview.",
+  copy_paste: "Copy / paste is disabled during this interview.",
+};
 
 // Browsers only expose camera/mic on a secure context. HTTPS, localhost,
 // 127.0.0.1, and ::1 are allowed; everything else (LAN IPs, custom hosts on
@@ -138,12 +158,20 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   // Ref so startListening can call submitAnswer without a circular useCallback dependency
   const submitAnswerRef = useRef<(answer: string) => void>(() => {});
 
-  // Proctoring violations — surfaced as transient warnings in the UI.
-  const [activeWarning, setActiveWarning] = useState<{
+  // Proctoring violations — count toward an HR-configured `maxViolations`
+  // budget. Each non-fatal violation surfaces a blocking modal; once the
+  // budget is exhausted the interview is force-closed. Camera denied / lost
+  // is treated as an environment abort, not a counted violation (mirrors the
+  // quiz round so the candidate can recover by fixing their camera).
+  const [warningModal, setWarningModal] = useState<{
     reason: ProctoringViolation;
-    label: string;
+    remaining: number;
   } | null>(null);
-  const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [terminated, setTerminated] = useState(false);
+  const [terminationReason, setTerminationReason] =
+    useState<ProctoringViolation | null>(null);
+  const violationCountRef = useRef(0);
+  const terminatedRef = useRef(false);
 
   // ── Proctoring + camera (owned by useProctoring) ────────────────────────────
   // The hook acquires the camera+mic stream, runs face detection at 2.5fps, and
@@ -157,6 +185,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   // LAN IP). The insecureOrigin error screen is rendered before this can fire.
   const proctoringEnabled =
     !insecureOrigin &&
+    !terminated &&
     phase !== "loading" &&
     phase !== "error" &&
     phase !== "completed";
@@ -173,12 +202,95 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
     [session?.antiCheat]
   );
 
-  const handleViolation = useCallback((reason: ProctoringViolation) => {
-    const label = violationLabel(reason);
-    setActiveWarning({ reason, label });
-    if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
-    warningTimerRef.current = setTimeout(() => setActiveWarning(null), 6000);
-  }, []);
+  // Camera permission / device errors abort the interview without flagging
+  // the candidate — they can come back once they fix the environment.
+  const abortInterview = useCallback(
+    async (reason: ProctoringViolation) => {
+      if (terminatedRef.current) return;
+      terminatedRef.current = true;
+      setTerminated(true);
+      setTerminationReason(reason);
+      setWarningModal(null);
+      try {
+        await fetch(`/api/interview/${sessionId}/violation`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: reason, level: "warning" }),
+        });
+      } catch {
+        // diagnostic log only — abort UI still proceeds
+      }
+      const candidateId = session?.candidateId;
+      window.setTimeout(() => {
+        if (candidateId) {
+          window.location.href = `/candidate/applications/${candidateId}`;
+        }
+      }, 4000);
+    },
+    [sessionId, session?.candidateId]
+  );
+
+  // Hard close + flag the candidate. Used once the violation budget is spent.
+  const forceCloseInterview = useCallback(
+    async (reason: ProctoringViolation) => {
+      if (terminatedRef.current) return;
+      terminatedRef.current = true;
+      setTerminated(true);
+      setTerminationReason(reason);
+      setWarningModal(null);
+      try {
+        await fetch(`/api/interview/${sessionId}/violation`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: reason, level: "terminate" }),
+        });
+      } catch {
+        // intentionally ignore — terminate UI still proceeds
+      }
+      const candidateId = session?.candidateId;
+      window.setTimeout(() => {
+        if (candidateId) {
+          window.location.href = `/candidate/applications/${candidateId}`;
+        }
+      }, 4000);
+    },
+    [sessionId, session?.candidateId]
+  );
+
+  const handleViolation = useCallback(
+    (reason: ProctoringViolation) => {
+      if (terminatedRef.current) return;
+
+      if (reason === "camera_denied" || reason === "camera_lost") {
+        abortInterview(reason);
+        return;
+      }
+
+      violationCountRef.current += 1;
+      // maxViolations from config is the total number of violations that
+      // triggers termination. Each one before that is a warning. Default 1
+      // means first violation closes (no warning).
+      const limit = session?.antiCheat?.maxViolations ?? 3;
+      const isTerminating = violationCountRef.current >= limit;
+
+      if (isTerminating) {
+        forceCloseInterview(reason);
+      } else {
+        // Record the warning-level violation server-side so the recruiter sees
+        // the full proctoring history, even if the candidate ultimately passes.
+        fetch(`/api/interview/${sessionId}/violation`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: reason, level: "warning" }),
+        }).catch(() => undefined);
+        setWarningModal({
+          reason,
+          remaining: limit - violationCountRef.current,
+        });
+      }
+    },
+    [abortInterview, forceCloseInterview, session?.antiCheat?.maxViolations, sessionId]
+  );
 
   const { videoRef, status: proctoringStatus, faceCount, detectorReady, stop: stopProctoring } =
     useProctoring({
@@ -187,11 +299,11 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       onViolation: handleViolation,
     });
 
+  // Once the candidate has been terminated, kill the proctoring stream so the
+  // camera light goes off while the redirect timer counts down.
   useEffect(() => {
-    return () => {
-      if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
-    };
-  }, []);
+    if (terminated) stopProctoring();
+  }, [terminated, stopProctoring]);
 
   // Once the proctoring camera is ready, advance from "loading" to "ready".
   // We're synchronizing our local phase to an external system (the proctoring
@@ -441,6 +553,51 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
     return <FullScreen><LoadingSpinner label="Loading interview…" /></FullScreen>;
   }
 
+  // Proctoring-driven exit screens — rendered before everything else so a
+  // termination from inside the active interview replaces the room.
+  if (terminated) {
+    const isCameraIssue =
+      terminationReason === "camera_denied" || terminationReason === "camera_lost";
+    if (isCameraIssue) {
+      return (
+        <FullScreen>
+          <div className="max-w-md space-y-3 px-6 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-900/40 text-amber-300 text-2xl">
+              ⚠
+            </div>
+            <p className="text-lg font-bold text-white">Camera unavailable</p>
+            <p className="text-sm text-slate-300 leading-relaxed">
+              {terminationReason ? VIOLATION_MESSAGES[terminationReason] : ""}
+            </p>
+            <p className="text-sm text-slate-400 leading-relaxed">
+              No worries — your interview wasn&apos;t scored. Fix your camera (check
+              browser permissions or reconnect the device) and come back to start
+              again. Returning to your application page…
+            </p>
+          </div>
+        </FullScreen>
+      );
+    }
+    return (
+      <FullScreen>
+        <div className="max-w-md space-y-3 px-6 text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-900/40 text-red-300 text-2xl">
+            ✕
+          </div>
+          <p className="text-lg font-bold text-white">Interview closed</p>
+          <p className="text-sm text-slate-300 leading-relaxed">
+            {terminationReason
+              ? VIOLATION_MESSAGES[terminationReason]
+              : "A proctoring violation was detected."}
+          </p>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Your application has been flagged for recruiter review. Returning to your application page…
+          </p>
+        </div>
+      </FullScreen>
+    );
+  }
+
   if (phase === "error") {
     if (insecureOrigin) {
       const currentHost = typeof window !== "undefined" ? window.location.host : "this URL";
@@ -558,7 +715,12 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   }
 
   if (phase === "completed" && result) {
-    const passed = isInterviewPassed(result.totalScore);
+    // HR-configured passing score wins when available; falls back to the
+    // legacy constant otherwise so older jobs without an AssessmentConfig
+    // still grade consistently.
+    const passingScore =
+      session?.interviewConfig?.passingScore ?? INTERVIEW_PASSING_SCORE;
+    const passed = result.totalScore >= passingScore;
     const resumeScore = session?.resumeMatchScore;
     const quizScore = session?.answerScore;
     return (
@@ -574,7 +736,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
               {result.totalScore}<span className="text-xl text-slate-400">/100</span>
             </p>
             <p className="text-xs text-slate-500">
-              Passing score: {INTERVIEW_PASSING_SCORE}/100
+              Passing score: {passingScore}/100
             </p>
             {result.overallFeedback && (
               <p className="text-sm text-slate-300 max-w-sm mx-auto leading-relaxed">{result.overallFeedback}</p>
@@ -693,7 +855,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
             <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-5 text-center space-y-2">
               <p className="text-sm text-slate-400">Thank you for completing the interview.</p>
               <p className="text-xs text-slate-500">
-                We appreciate your time. A minimum score of {INTERVIEW_PASSING_SCORE}/100 is needed to pass.
+                We appreciate your time. A minimum score of {passingScore}/100 is needed to pass.
               </p>
               <Link href="/jobs"
                 className="mt-2 inline-block rounded-lg bg-slate-700 px-5 py-2 text-sm font-bold text-white hover:bg-slate-600 transition-colors">
@@ -827,22 +989,17 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
         </div>
       </div>
 
-      {/* Proctoring warning banner — webcam-only warnings stay hidden when
-          monitoring is off; tab-switch / window-blur warnings still surface. */}
-      {((proctoringConfig.webcamMonitoring && tooManyFacesActive) || activeWarning) && (
-        <div
-          className={`px-5 py-2 text-sm text-center font-medium ${
-            (proctoringConfig.webcamMonitoring && tooManyFacesActive) ||
-            activeWarning?.reason === "multi_face"
-              ? "bg-red-950/70 text-red-200 border-b border-red-700/50"
-              : activeWarning?.reason === "no_face" || noFaceActive
-              ? "bg-amber-950/70 text-amber-200 border-b border-amber-700/50"
-              : "bg-slate-800/70 text-slate-200 border-b border-slate-700"
-          }`}
-        >
-          {proctoringConfig.webcamMonitoring && tooManyFacesActive
-            ? `⚠ ${faceCount} people detected in frame. Only you should be visible.`
-            : activeWarning?.label}
+      {/* Live face-count banner — stays as a status indicator while too many /
+          no faces are in frame. The actual violation event (after the
+          sustained-detection threshold) surfaces in the modal below. */}
+      {proctoringConfig.webcamMonitoring && tooManyFacesActive && (
+        <div className="px-5 py-2 text-sm text-center font-medium bg-red-950/70 text-red-200 border-b border-red-700/50">
+          ⚠ {faceCount} people detected in frame. Only you should be visible.
+        </div>
+      )}
+      {proctoringConfig.webcamMonitoring && noFaceActive && detectorReady && (
+        <div className="px-5 py-2 text-sm text-center font-medium bg-amber-950/70 text-amber-200 border-b border-amber-700/50">
+          ⚠ We can&apos;t see your face. Please reposition yourself in the camera.
         </div>
       )}
 
@@ -961,6 +1118,36 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           </>
         )}
       </div>
+
+      {warningModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+          <div className="w-full max-w-md rounded-xl border border-amber-700 bg-slate-900 p-6 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-900/60 text-amber-300">
+                <span className="text-xl font-bold">!</span>
+              </span>
+              <h2 className="text-base font-bold text-white">Warning</h2>
+            </div>
+            <p className="mt-3 text-sm text-slate-200">
+              {VIOLATION_MESSAGES[warningModal.reason]}
+            </p>
+            <p className="mt-3 text-sm font-semibold text-amber-300">
+              {warningModal.remaining <= 0
+                ? "Your next violation will close the interview."
+                : `${warningModal.remaining} more violation${
+                    warningModal.remaining === 1 ? "" : "s"
+                  } will close the interview and flag your application.`}
+            </p>
+            <button
+              type="button"
+              onClick={() => setWarningModal(null)}
+              className="mt-5 w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-500 transition-colors"
+            >
+              I understand — continue
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1116,27 +1303,3 @@ function ProctoringChip({
   );
 }
 
-function violationLabel(reason: ProctoringViolation): string {
-  switch (reason) {
-    case "multi_face":
-      return "Multiple people detected in frame. Only you should be visible.";
-    case "no_face":
-      return "We can't see your face. Please reposition yourself in front of the camera.";
-    case "camera_denied":
-      return "Camera access was denied. Please allow camera permission and reload.";
-    case "camera_lost":
-      return "Camera disconnected. Reconnect it to continue the interview.";
-    case "tab_switch":
-      return "Tab switch detected. Stay on this tab during the interview.";
-    case "window_blur":
-      return "Window lost focus. Keep this window active during the interview.";
-    case "voice_detected":
-      return "Other voices detected nearby. Find a quiet space and continue.";
-    case "fullscreen_exit":
-      return "Fullscreen was exited.";
-    case "copy_paste":
-      return "Copy / paste is not allowed during the interview.";
-    default:
-      return "Proctoring warning.";
-  }
-}
