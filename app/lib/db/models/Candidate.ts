@@ -5,10 +5,22 @@ export interface IApplicationAnswer {
   answer: string;
 }
 
+export type ProctoringRound = "quiz" | "interview";
+
+export type IdentityMatchVerdict = "strong" | "match" | "suspicious" | "mismatch" | "no_face" | "multi_face";
+
 export interface IProctoringSnapshot {
   data: Buffer;
   contentType: string;
   capturedAt: Date;
+  /** Which round the snapshot was taken in. Older snapshots may not have this. */
+  round?: ProctoringRound;
+  /** 0-100 confidence the live frame matches the candidate's profile photo. */
+  matchScore?: number;
+  /** Match verdict from the periodic identity recheck. */
+  matchVerdict?: IdentityMatchVerdict;
+  /** True when the verdict indicates a face mismatch (or no/multi face). */
+  mismatch?: boolean;
 }
 
 export type ProctoringViolationType =
@@ -20,13 +32,25 @@ export type ProctoringViolationType =
   | "no_face"
   | "voice_detected"
   | "fullscreen_exit"
-  | "copy_paste";
+  | "copy_paste"
+  | "face_mismatch";
 
 export interface IProctoringViolation {
   type: ProctoringViolationType;
   /** "warning" = first offence, user was warned. "terminate" = quiz force-closed. */
   level: "warning" | "terminate";
   at: Date;
+  /** Which round the violation occurred in. Older entries may not have this. */
+  round?: ProctoringRound;
+}
+
+export interface IRoundClosure {
+  round: ProctoringRound;
+  /** Violation type that caused the closure (or "face_mismatch"). */
+  type: ProctoringViolationType;
+  /** Human-readable explanation shown to the candidate and HR. */
+  reason: string;
+  closedAt: Date;
 }
 
 /**
@@ -89,6 +113,8 @@ export interface ICandidate extends Document {
   proctoringViolations?: IProctoringViolation[];
   /** Set true when the quiz was force-closed by the proctoring system. */
   proctoringFlagged?: boolean;
+  /** Per-round closure records — what got closed, why, and when. */
+  roundClosures?: IRoundClosure[];
   /** Quiz questions persisted on first open so the candidate replays the same set across sessions. */
   quizQuestions?: IPersistedQuizQuestion[];
   quizTimeLimitSeconds?: number;
@@ -184,6 +210,14 @@ const CandidateSchema = new Schema<ICandidate>(
             data: { type: Buffer, required: true },
             contentType: { type: String, default: "image/jpeg" },
             capturedAt: { type: Date, default: Date.now },
+            round: { type: String, enum: ["quiz", "interview"], default: undefined },
+            matchScore: { type: Number, default: undefined },
+            matchVerdict: {
+              type: String,
+              enum: ["strong", "match", "suspicious", "mismatch", "no_face", "multi_face"],
+              default: undefined,
+            },
+            mismatch: { type: Boolean, default: undefined },
           },
           { _id: false }
         ),
@@ -204,11 +238,15 @@ const CandidateSchema = new Schema<ICandidate>(
                 "multi_face",
                 "no_face",
                 "voice_detected",
+                "fullscreen_exit",
+                "copy_paste",
+                "face_mismatch",
               ],
               required: true,
             },
             level: { type: String, enum: ["warning", "terminate"], required: true },
             at: { type: Date, default: Date.now },
+            round: { type: String, enum: ["quiz", "interview"], default: undefined },
           },
           { _id: false }
         ),
@@ -216,6 +254,35 @@ const CandidateSchema = new Schema<ICandidate>(
       default: [],
     },
     proctoringFlagged: { type: Boolean, default: false },
+    roundClosures: {
+      type: [
+        new Schema<IRoundClosure>(
+          {
+            round: { type: String, enum: ["quiz", "interview"], required: true },
+            type: {
+              type: String,
+              enum: [
+                "camera_denied",
+                "camera_lost",
+                "tab_switch",
+                "window_blur",
+                "multi_face",
+                "no_face",
+                "voice_detected",
+                "fullscreen_exit",
+                "copy_paste",
+                "face_mismatch",
+              ],
+              required: true,
+            },
+            reason: { type: String, required: true },
+            closedAt: { type: Date, default: Date.now },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     quizQuestions: { type: [PersistedQuizQuestionSchema], default: undefined },
     quizTimeLimitSeconds: { type: Number },
     quizStartedAt: { type: Date },

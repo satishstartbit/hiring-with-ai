@@ -10,6 +10,7 @@ import {
   useProctoring,
   type ProctoringViolation,
 } from "./proctoring/useProctoring";
+import { useIdentityRecheck } from "./proctoring/useIdentityRecheck";
 
 interface BrowserSpeechRecognitionAlternative {
   transcript: string;
@@ -134,6 +135,8 @@ const VIOLATION_MESSAGES: Record<ProctoringViolation, string> = {
   voice_detected: "Background voices were detected. Please be in a quiet space.",
   fullscreen_exit: "You exited fullscreen mode. Fullscreen is required for this interview.",
   copy_paste: "Copy / paste is disabled during this interview.",
+  face_mismatch:
+    "The person on camera doesn't match your profile photo. The interview cannot continue.",
 };
 
 // Browsers only expose camera/mic on a secure context. HTTPS, localhost,
@@ -191,6 +194,8 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   const [terminated, setTerminated] = useState(false);
   const [terminationReason, setTerminationReason] =
     useState<ProctoringViolation | null>(null);
+  const [closureMessage, setClosureMessage] = useState<string | null>(null);
+  const [identityWarning, setIdentityWarning] = useState<string | null>(null);
   const violationCountRef = useRef(0);
   const terminatedRef = useRef(false);
 
@@ -260,11 +265,15 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       setTerminationReason(reason);
       setWarningModal(null);
       try {
-        await fetch(`/api/interview/${sessionId}/violation`, {
+        const res = await fetch(`/api/interview/${sessionId}/violation`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ type: reason, level: "terminate" }),
         });
+        const data = (await res.json().catch(() => ({}))) as {
+          closureReason?: string | null;
+        };
+        if (data.closureReason) setClosureMessage(data.closureReason);
       } catch {
         // intentionally ignore — terminate UI still proceeds
       }
@@ -339,6 +348,38 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (terminated) stopProctoring();
   }, [terminated, stopProctoring]);
+
+  const identityRecheckEnabled =
+    proctoringEnabled &&
+    proctoringConfig.webcamMonitoring &&
+    proctoringStatus === "ready" &&
+    Boolean(session?.candidateId);
+  useIdentityRecheck({
+    videoRef,
+    enabled: identityRecheckEnabled,
+    applicationId: session?.candidateId ?? "",
+    round: "interview",
+    onCheck: (r) => {
+      if (
+        r.verdict === "mismatch" ||
+        r.verdict === "no_face" ||
+        r.verdict === "multi_face"
+      ) {
+        setIdentityWarning(
+          r.verdict === "mismatch"
+            ? `Face mismatch detected (${r.confidence}% confidence). Please make sure you're the same person on the profile photo.`
+            : r.verdict === "no_face"
+              ? "We can't see your face. Please stay in frame."
+              : "Multiple faces detected. Only you should be visible."
+        );
+      } else {
+        setIdentityWarning(null);
+      }
+    },
+    onMismatch: () => {
+      handleViolation("face_mismatch");
+    },
+  });
 
   // Once the proctoring camera is ready, advance from "loading" to "ready".
   // We're synchronizing our local phase to an external system (the proctoring
@@ -661,9 +702,10 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           </div>
           <p className="text-lg font-bold text-white">Interview closed</p>
           <p className="text-sm text-slate-300 leading-relaxed">
-            {terminationReason
-              ? VIOLATION_MESSAGES[terminationReason]
-              : "A proctoring violation was detected."}
+            {closureMessage ??
+              (terminationReason
+                ? VIOLATION_MESSAGES[terminationReason]
+                : "A proctoring violation was detected.")}
           </p>
           <p className="text-sm text-slate-400 leading-relaxed">
             Your application has been flagged for recruiter review. Returning to your application page…
@@ -1099,6 +1141,12 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           ⚠ We can&apos;t see your face. Please reposition yourself in the camera.
         </div>
       )}
+
+      {identityWarning ? (
+        <div className="px-5 py-2 text-sm text-center font-medium bg-amber-950/70 text-amber-200 border-b border-amber-700/50">
+          ⚠ {identityWarning}
+        </div>
+      ) : null}
 
       {/* Progress bar */}
       <div className="h-0.5 w-full bg-slate-800">

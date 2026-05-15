@@ -5,6 +5,7 @@ import InterviewSession from "../../../../lib/db/models/InterviewSession";
 import Candidate, {
   type ProctoringViolationType,
 } from "../../../../lib/db/models/Candidate";
+import { describeClosure } from "../../../../lib/proctoring/closureReasons";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,7 @@ const VALID_TYPES: ProctoringViolationType[] = [
   "voice_detected",
   "fullscreen_exit",
   "copy_paste",
+  "face_mismatch",
 ];
 
 interface ViolationBody {
@@ -50,9 +52,6 @@ export async function POST(
     return Response.json({ error: "Session not found" }, { status: 404 });
   }
 
-  // Only accept violation reports while the interview is open. Once it's
-  // completed (or already terminated) we don't want stale clients to keep
-  // posting and overwriting the final state.
   if (session.status === "completed") {
     return Response.json({ error: "Interview is not active" }, { status: 400 });
   }
@@ -74,12 +73,11 @@ export async function POST(
     type,
     level: effectiveLevel,
     at: new Date(),
+    round: "interview",
   });
 
   if (effectiveLevel === "terminate") {
-    // Force-close the interview. We don't run the AI grader — the recruiter
-    // will review the captured snapshots and any partial answers manually,
-    // mirroring how the quiz handles a proctoring termination.
+    const reason = describeClosure(type, "interview");
     const questionCount = session.questions.length;
     session.status = "completed";
     session.completedAt = new Date();
@@ -89,14 +87,20 @@ export async function POST(
       { length: questionCount },
       () => "Not graded — interview was force-closed due to proctoring violations."
     );
-    session.overallFeedback =
-      "Interview was terminated by the proctoring system. The recruiter will " +
-      "review the captured snapshots and any answers submitted before this point.";
+    session.overallFeedback = reason;
     await session.save();
 
     candidate.proctoringFlagged = true;
     candidate.stage = "completed";
     candidate.status = "reviewing";
+
+    candidate.roundClosures = candidate.roundClosures ?? [];
+    candidate.roundClosures.push({
+      round: "interview",
+      type,
+      reason,
+      closedAt: new Date(),
+    });
   }
 
   await candidate.save();
@@ -106,5 +110,7 @@ export async function POST(
     flagged: candidate.proctoringFlagged ?? false,
     status: session.status,
     cameraIssue: isCameraIssue,
+    closureReason:
+      effectiveLevel === "terminate" ? describeClosure(type, "interview") : null,
   });
 }

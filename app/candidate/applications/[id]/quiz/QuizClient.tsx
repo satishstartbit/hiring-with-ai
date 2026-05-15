@@ -8,6 +8,7 @@ import {
   type ProctoringViolation,
   type ProctoringConfig,
 } from "../../../../components/proctoring/useProctoring";
+import { useIdentityRecheck } from "../../../../components/proctoring/useIdentityRecheck";
 import CodeEditor from "../../../../components/quiz/CodeEditor";
 
 type PublicQuestionType = "mcq" | "multi_select" | "descriptive" | "coding";
@@ -69,6 +70,8 @@ const VIOLATION_MESSAGES: Record<ProctoringViolation, string> = {
   voice_detected: "Voice was detected. Please remain silent during the quiz.",
   fullscreen_exit: "You exited fullscreen mode. Fullscreen is required for this quiz.",
   copy_paste: "Copy / paste is disabled during this quiz.",
+  face_mismatch:
+    "The person on camera doesn't match your profile photo. The quiz cannot continue.",
 };
 
 // Pretty labels for the consent screen so the candidate sees what HR enabled.
@@ -146,6 +149,7 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
   } | null>(null);
   const [terminated, setTerminated] = useState(false);
   const [terminationReason, setTerminationReason] = useState<ProctoringViolation | null>(null);
+  const [closureMessage, setClosureMessage] = useState<string | null>(null);
   const violationCountRef = useRef(0);
   const answersRef = useRef<string[]>([]);
   useEffect(() => {
@@ -244,7 +248,7 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
       setTerminationReason(reason);
       setWarningModal(null);
       try {
-        await fetch(
+        const res = await fetch(
           `/api/candidate/applications/${applicationId}/proctoring/violation`,
           {
             method: "POST",
@@ -252,17 +256,22 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
             body: JSON.stringify({
               type: reason,
               level: "terminate",
+              round: "quiz",
               answers: answersRef.current,
             }),
           }
         );
+        const data = (await res.json().catch(() => ({}))) as {
+          closureReason?: string | null;
+        };
+        if (data.closureReason) setClosureMessage(data.closureReason);
       } catch {
         // intentionally ignore — terminate UI still proceeds
       }
       router.refresh();
       window.setTimeout(() => {
         router.push(`/candidate/applications/${applicationId}`);
-      }, 4000);
+      }, 6000);
     },
     [applicationId, router]
   );
@@ -279,7 +288,7 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ type: reason, level: "warning" }),
+            body: JSON.stringify({ type: reason, level: "warning", round: "quiz" }),
           }
         );
       } catch {
@@ -287,7 +296,7 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
       }
       window.setTimeout(() => {
         router.push(`/candidate/applications/${applicationId}`);
-      }, 4000);
+      }, 6000);
     },
     [applicationId, router]
   );
@@ -314,6 +323,7 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
         body: JSON.stringify({
           type: reason,
           level: isTerminating ? "terminate" : "warning",
+          round: "quiz",
         }),
       }).catch(() => undefined);
 
@@ -340,6 +350,41 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
     enabled: proctoringEnabled,
     config: proctoringConfig,
     onViolation: handleViolation,
+  });
+
+  // Periodic identity recheck — every 30s, capture a frame, run a face match
+  // against the candidate's stored profile photo descriptor, upload the
+  // snapshot + match metadata to the server, and surface mismatches as a
+  // `face_mismatch` violation so the existing warning + auto-close pipeline
+  // handles enforcement.
+  const identityRecheckEnabled =
+    proctoringEnabled && proctoringConfig.webcamMonitoring && status === "ready";
+  const [identityWarning, setIdentityWarning] = useState<string | null>(null);
+  useIdentityRecheck({
+    videoRef,
+    enabled: identityRecheckEnabled,
+    applicationId,
+    round: "quiz",
+    onCheck: (r) => {
+      if (
+        r.verdict === "mismatch" ||
+        r.verdict === "no_face" ||
+        r.verdict === "multi_face"
+      ) {
+        setIdentityWarning(
+          r.verdict === "mismatch"
+            ? `Face mismatch detected (${r.confidence}% confidence). Please make sure you're the same person on the profile photo.`
+            : r.verdict === "no_face"
+              ? "We can't see your face. Please stay in frame."
+              : "Multiple faces detected. Only you should be visible."
+        );
+      } else {
+        setIdentityWarning(null);
+      }
+    },
+    onMismatch: () => {
+      handleViolation("face_mismatch");
+    },
   });
 
   useEffect(() => {
@@ -449,9 +494,10 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
       <div className="rounded-xl border border-rose-200 bg-rose-50 p-6">
         <h2 className="text-base font-bold text-rose-900">Quiz closed</h2>
         <p className="mt-2 text-sm text-rose-800">
-          {terminationReason
-            ? VIOLATION_MESSAGES[terminationReason]
-            : "A proctoring violation was detected."}
+          {closureMessage ??
+            (terminationReason
+              ? VIOLATION_MESSAGES[terminationReason]
+              : "A proctoring violation was detected.")}
         </p>
         <p className="mt-3 text-sm text-rose-700">
           Your application has been flagged for recruiter review. Returning to your application page…
@@ -491,6 +537,11 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
               <li className="flex gap-2">
                 <span className="text-indigo-600">•</span>
                 Only <strong>you</strong> should be visible. A second person in frame ends the quiz.
+              </li>
+              <li className="flex gap-2">
+                <span className="text-indigo-600">•</span>
+                We capture a camera snapshot every <strong>30 seconds</strong> and compare your face
+                to your profile photo. Repeated mismatches end the quiz.
               </li>
               <li className="flex gap-2">
                 <span className="text-indigo-600">•</span>
@@ -635,6 +686,15 @@ export default function QuizClient({ applicationId }: Readonly<{ applicationId: 
             {formatTime(timeLeft)}
           </span>
         </div>
+
+        {identityWarning && (
+          <div
+            role="alert"
+            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+          >
+            {identityWarning}
+          </div>
+        )}
 
         <div className="space-y-1">
           <div className="flex items-center justify-between text-xs text-slate-500">

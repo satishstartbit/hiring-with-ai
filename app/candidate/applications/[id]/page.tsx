@@ -101,7 +101,7 @@ export default async function CandidateApplicationPage({
   await connectDB();
   const app = await Candidate.findOne({ _id: id, userId: session.userId })
     .select(
-      "_id jobId jobTitle stage createdAt updatedAt resumeMatchScore resumeMatchReason resumeFilename answerScore questionScores questionFeedback overallFeedback screeningQuestions interviewSessionId quizSubmittedAt"
+      "_id jobId jobTitle stage createdAt updatedAt resumeMatchScore resumeMatchReason resumeFilename answerScore questionScores questionFeedback overallFeedback screeningQuestions interviewSessionId quizSubmittedAt proctoringFlagged roundClosures"
     )
     .lean();
   if (!app) notFound();
@@ -144,6 +144,36 @@ export default async function CandidateApplicationPage({
         </p>
         <StageTimeline stage={stage} />
       </header>
+
+      {(app.roundClosures?.length ?? 0) > 0 && (
+        <section className="rounded-xl border border-rose-200 bg-rose-50 p-6 shadow-sm">
+          <h2 className="text-base font-semibold text-rose-900">Assessment closed</h2>
+          <p className="mt-1 text-sm text-rose-800">
+            One or more rounds ended early due to proctoring or identity verification.
+          </p>
+          <ul className="mt-4 space-y-3">
+            {(app.roundClosures ?? []).map((c, i) => (
+              <li
+                key={`closure-${i}`}
+                className="rounded-lg border border-rose-200 bg-white px-4 py-3 text-sm text-rose-900"
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">
+                  {c.round === "quiz" ? "Quiz" : "AI interview"} ·{" "}
+                  {new Date(c.closedAt).toLocaleString()}
+                </p>
+                <p className="mt-1 leading-relaxed">{c.reason}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {app.proctoringFlagged && (app.roundClosures?.length ?? 0) === 0 && (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Your application was flagged during proctoring. The hiring team will review what
+          happened.
+        </section>
+      )}
 
       <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-slate-900">{view.heading}</h2>

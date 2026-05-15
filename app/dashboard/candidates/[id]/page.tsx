@@ -9,6 +9,9 @@ import Assessment from "@/app/lib/db/models/Assessment";
 import CandidateAnswer from "@/app/lib/db/models/CandidateAnswer";
 import AIReport from "@/app/lib/db/models/AIReport";
 import SuspiciousActivity from "@/app/lib/db/models/SuspiciousActivity";
+import ProctoringSnapshotsGallery, {
+  type SnapshotMeta,
+} from "@/app/components/proctoring/ProctoringSnapshotsGallery";
 
 export const metadata = { title: "Candidate — HireAI" };
 export const dynamic = "force-dynamic";
@@ -73,7 +76,7 @@ export default async function CandidateDetailPage({
   const { id } = await params;
   await connectDB();
 
-  const candidate = await Candidate.findById(id).lean();
+  const candidate = await Candidate.findById(id).select("-proctoringSnapshots.data").lean();
   if (!candidate) notFound();
 
   // Workspace scoping: candidates aren't workspace-scoped directly — they hang
@@ -127,6 +130,17 @@ export default async function CandidateDetailPage({
   const screeningAnswers = candidate.screeningAnswers ?? [];
   const questionScores = candidate.questionScores ?? [];
   const questionFeedback = candidate.questionFeedback ?? [];
+  const snapshotMeta: SnapshotMeta[] = (candidate.proctoringSnapshots ?? []).map(
+    (snap, index) => ({
+      index,
+      round: snap.round,
+      capturedAt: snap.capturedAt,
+      matchVerdict: snap.matchVerdict,
+      matchScore: snap.matchScore,
+      mismatch: snap.mismatch,
+    })
+  );
+  const roundClosures = candidate.roundClosures ?? [];
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -514,6 +528,57 @@ export default async function CandidateDetailPage({
               })}
             </ol>
           )}
+        </section>
+      )}
+
+      {/* Round closures — why quiz / interview was force-closed */}
+      {roundClosures.length > 0 && (
+        <section className="mb-6 rounded-xl border border-rose-200 bg-rose-50/60">
+          <div className="border-b border-rose-100 px-5 py-3">
+            <h2 className="text-base font-semibold text-rose-900">Round closures</h2>
+            <p className="mt-0.5 text-xs text-rose-700">
+              Assessment rounds ended early due to proctoring or identity checks.
+            </p>
+          </div>
+          <ul className="divide-y divide-rose-100">
+            {roundClosures.map((c, i) => (
+              <li key={`closure-${i}`} className="px-5 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-rose-800">
+                    {c.round === "quiz" ? "Quiz" : "AI interview"}
+                  </span>
+                  <span className="text-xs text-rose-600">{formatDate(c.closedAt)}</span>
+                </div>
+                <p className="mt-2 text-sm leading-relaxed text-rose-900">{c.reason}</p>
+                <p className="mt-1 text-xs text-rose-700">
+                  Violation: {c.type.replace(/_/g, " ")}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Proctoring webcam snapshots */}
+      {snapshotMeta.length > 0 && (
+        <section className="mb-6 rounded-xl border border-slate-200 bg-white">
+          <div className="border-b border-slate-100 px-5 py-3">
+            <h2 className="text-base font-semibold text-slate-900">
+              Proctoring snapshots
+              <span className="ml-2 text-xs font-normal text-slate-500">
+                {snapshotMeta.length} captured
+              </span>
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Camera frames captured every ~30 seconds during the quiz and AI interview.
+            </p>
+          </div>
+          <div className="px-5 py-4">
+            <ProctoringSnapshotsGallery
+              candidateId={String(candidate._id)}
+              snapshots={snapshotMeta}
+            />
+          </div>
         </section>
       )}
 

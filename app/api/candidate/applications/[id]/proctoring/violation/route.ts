@@ -3,8 +3,10 @@ import mongoose from "mongoose";
 import { readSession } from "../../../../../../lib/auth/session";
 import { connectDB } from "../../../../../../lib/db/connection";
 import Candidate, {
+  type ProctoringRound,
   type ProctoringViolationType,
 } from "../../../../../../lib/db/models/Candidate";
+import { describeClosure } from "../../../../../../lib/proctoring/closureReasons";
 
 export const dynamic = "force-dynamic";
 
@@ -16,12 +18,16 @@ const VALID_TYPES: ProctoringViolationType[] = [
   "multi_face",
   "no_face",
   "voice_detected",
+  "fullscreen_exit",
+  "copy_paste",
+  "face_mismatch",
 ];
 
 interface ViolationBody {
   type?: unknown;
   level?: unknown;
   answers?: unknown;
+  round?: unknown;
 }
 
 export async function POST(
@@ -44,6 +50,7 @@ export async function POST(
   const body = (await request.json().catch(() => ({}))) as ViolationBody;
   const type = body.type as ProctoringViolationType;
   const level = body.level;
+  const round: ProctoringRound = body.round === "interview" ? "interview" : "quiz";
   if (!VALID_TYPES.includes(type)) {
     return Response.json({ error: "Invalid violation type" }, { status: 400 });
   }
@@ -57,8 +64,6 @@ export async function POST(
     return Response.json({ error: "Application not found" }, { status: 404 });
   }
 
-  // Only accept violation reports while the quiz is open. Once it's submitted
-  // we don't want stale clients to keep posting.
   if (
     candidate.stage !== "quiz_in_progress" &&
     candidate.stage !== "screening"
@@ -74,17 +79,21 @@ export async function POST(
   const effectiveLevel = isCameraIssue ? "warning" : level;
 
   candidate.proctoringViolations = candidate.proctoringViolations ?? [];
-  candidate.proctoringViolations.push({ type, level: effectiveLevel, at: new Date() });
+  candidate.proctoringViolations.push({
+    type,
+    level: effectiveLevel,
+    at: new Date(),
+    round,
+  });
 
   if (effectiveLevel === "terminate") {
-    // Force-close the quiz. Save whatever answers the client managed to send,
-    // mark the application as flagged, and skip AI grading — the recruiter
-    // will review the answers and proctoring snapshots manually.
     const rawAnswers = Array.isArray(body.answers) ? (body.answers as unknown[]) : [];
     const questions = candidate.quizQuestions ?? [];
     const answers = questions.map((_, i) =>
       typeof rawAnswers[i] === "string" ? (rawAnswers[i] as string) : ""
     );
+
+    const reason = describeClosure(type, round);
 
     candidate.screeningQuestions = questions.map((q) => q.text);
     candidate.screeningAnswers = answers;
@@ -93,12 +102,18 @@ export async function POST(
     candidate.questionFeedback = questions.map(
       () => "Not graded — quiz was force-closed due to proctoring violations."
     );
-    candidate.overallFeedback =
-      "Quiz was terminated by the proctoring system. The recruiter will review " +
-      "the captured snapshots and any answers submitted before this point.";
+    candidate.overallFeedback = reason;
     candidate.proctoringFlagged = true;
     candidate.quizSubmittedAt = new Date();
     candidate.stage = "quiz_completed";
+
+    candidate.roundClosures = candidate.roundClosures ?? [];
+    candidate.roundClosures.push({
+      round,
+      type,
+      reason,
+      closedAt: new Date(),
+    });
   }
 
   await candidate.save();
@@ -108,5 +123,7 @@ export async function POST(
     flagged: candidate.proctoringFlagged ?? false,
     stage: candidate.stage,
     cameraIssue: isCameraIssue,
+    closureReason:
+      effectiveLevel === "terminate" ? describeClosure(type, round) : null,
   });
 }

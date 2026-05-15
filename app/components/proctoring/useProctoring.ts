@@ -13,7 +13,8 @@ export type ProctoringViolation =
   | "no_face"
   | "voice_detected"
   | "fullscreen_exit"
-  | "copy_paste";
+  | "copy_paste"
+  | "face_mismatch";
 
 export type ProctoringStatus = "idle" | "requesting" | "ready" | "terminated";
 
