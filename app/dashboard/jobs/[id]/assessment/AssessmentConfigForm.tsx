@@ -239,7 +239,7 @@ export default function AssessmentConfigForm({
 
       {/* DIFFICULTY */}
       <Section
-        title="Difficulty"
+        title="Quiz Section"
         description="How challenging the AI should make the question set."
       >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -547,10 +547,10 @@ export default function AssessmentConfigForm({
         </div>
       </Section>
 
-      {/* ANTI-CHEAT */}
+      {/* ANTI-CHEAT — quiz round */}
       <Section
-        title="Anti-cheating"
-        description="Behavior to enforce while the candidate takes the assessment."
+        title="Anti-cheating (quiz)"
+        description="Proctoring rules enforced during the written quiz. AI interview proctoring is configured in the section below."
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <Toggle
@@ -895,6 +895,73 @@ export default function AssessmentConfigForm({
                 patch("interview", { ...cfg.interview, adaptiveDifficulty: v })
               }
             />
+          </div>
+        </div>
+
+        <div className="mt-8 border-t border-slate-200 pt-6">
+          <Label>Anti-cheating (AI interview)</Label>
+          <p className="mt-1 text-xs text-slate-500">
+            Proctoring during the voice interview. Uses the same settings as the quiz
+            anti-cheating section — configure once, enforced in both rounds.
+          </p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <Toggle
+              label="Detect tab switching"
+              hint="Flag when the candidate leaves the interview tab."
+              checked={cfg.antiCheat.tabSwitchDetection}
+              onChange={(v) =>
+                patch("antiCheat", { ...cfg.antiCheat, tabSwitchDetection: v })
+              }
+            />
+            <Toggle
+              label="Require fullscreen"
+              hint="Force fullscreen for the entire interview."
+              checked={cfg.antiCheat.fullscreenRequired}
+              onChange={(v) =>
+                patch("antiCheat", { ...cfg.antiCheat, fullscreenRequired: v })
+              }
+            />
+            <Toggle
+              label="Block copy / paste"
+              hint="Disable clipboard within the interview view."
+              checked={cfg.antiCheat.blockCopyPaste}
+              onChange={(v) =>
+                patch("antiCheat", { ...cfg.antiCheat, blockCopyPaste: v })
+              }
+            />
+            <Toggle
+              label="Webcam monitoring"
+              hint="Detect multiple people or no face during the interview."
+              checked={cfg.antiCheat.webcamMonitoring}
+              onChange={(v) =>
+                patch("antiCheat", { ...cfg.antiCheat, webcamMonitoring: v })
+              }
+            />
+            <Toggle
+              label="Track suspicious activity"
+              hint="Log violations to the candidate report for HR review."
+              checked={cfg.antiCheat.trackSuspiciousActivity}
+              onChange={(v) =>
+                patch("antiCheat", { ...cfg.antiCheat, trackSuspiciousActivity: v })
+              }
+            />
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <Label>Auto-terminate after N violations</Label>
+              <p className="text-xs text-slate-500">0 = never auto-terminate.</p>
+              <input
+                type="number"
+                min={0}
+                max={50}
+                value={cfg.antiCheat.maxViolations}
+                onChange={(e) =>
+                  patch("antiCheat", {
+                    ...cfg.antiCheat,
+                    maxViolations: Math.max(0, Number(e.target.value) || 0),
+                  })
+                }
+                className="mt-2 w-24 rounded-md border border-slate-300 px-2 py-1 text-sm"
+              />
+            </div>
           </div>
         </div>
       </Section>

@@ -3,13 +3,16 @@ import mongoose from "mongoose";
 import { connectDB } from "../../../../lib/db/connection";
 import InterviewSession from "../../../../lib/db/models/InterviewSession";
 import AssessmentConfig from "../../../../lib/db/models/AssessmentConfig";
+import {
+  isInterviewTimeExpired,
+  resolveInterviewSettings,
+} from "../../../../lib/interview/assessmentSettings";
 import { runSendMessage } from "../../../../lib/workflow/interviewGraph";
 import {
   ZERO_SCORES,
   type PlannedQuestion,
   type QuestionType,
   type Difficulty,
-  type InterviewSettings,
 } from "../../../../lib/workflow/interviewState";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +40,19 @@ export async function POST(
     return Response.json({ error: "Interview already completed" }, { status: 400 });
   }
 
+  const assessmentConfig = await AssessmentConfig.findOne({ jobId: session.jobId })
+    .select("interview")
+    .lean();
+  const durationMinutes = assessmentConfig?.interview?.durationMinutes ?? 15;
+  if (
+    isInterviewTimeExpired(durationMinutes, session.status, session.startedAt)
+  ) {
+    return Response.json(
+      { error: "Interview time has expired. Please submit to finish." },
+      { status: 400 }
+    );
+  }
+
   const questions: PlannedQuestion[] = (session.questionPlan ?? []).length
     ? session.questionPlan!.map((q) => ({
         prompt: q.prompt,
@@ -52,28 +68,7 @@ export async function POST(
         generatedAdaptively: false,
       }));
 
-  // Re-load per-job AI-interview settings so allowFollowups + adaptiveDifficulty
-  // are enforced on every candidate turn, not just at planning time.
-  const assessmentConfig = await AssessmentConfig.findOne({ jobId: session.jobId })
-    .select("interview")
-    .lean();
-  const interviewSettings: InterviewSettings | null = assessmentConfig?.interview
-    ? {
-        durationMinutes: assessmentConfig.interview.durationMinutes ?? 15,
-        questionCount: assessmentConfig.interview.questionCount ?? 8,
-        topics:
-          (assessmentConfig.interview.topics as QuestionType[]) ?? [
-            "introduction",
-            "technical",
-            "scenario",
-            "behavioral",
-          ],
-        difficulty: assessmentConfig.interview.difficulty ?? "medium",
-        passingScore: assessmentConfig.interview.passingScore ?? 20,
-        allowFollowups: assessmentConfig.interview.allowFollowups ?? true,
-        adaptiveDifficulty: assessmentConfig.interview.adaptiveDifficulty ?? true,
-      }
-    : null;
+  const interviewSettings = resolveInterviewSettings(assessmentConfig?.interview);
 
   const result = await runSendMessage({
     candidateId: session.candidateId.toString(),

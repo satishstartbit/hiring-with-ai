@@ -18,7 +18,9 @@ export type ProctoringViolationType =
   | "window_blur"
   | "multi_face"
   | "no_face"
-  | "voice_detected";
+  | "voice_detected"
+  | "fullscreen_exit"
+  | "copy_paste";
 
 export interface IProctoringViolation {
   type: ProctoringViolationType;

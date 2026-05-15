@@ -4,7 +4,11 @@ import mongoose from "mongoose";
 import { requireCandidate } from "@/app/lib/auth/dal";
 import { connectDB } from "@/app/lib/db/connection";
 import Candidate from "@/app/lib/db/models/Candidate";
-import InterviewLaunchClient from "./InterviewLaunchClient";
+import AssessmentConfig from "@/app/lib/db/models/AssessmentConfig";
+import { resolveAntiCheat } from "@/app/lib/interview/assessmentSettings";
+import InterviewLaunchClient, {
+  type InterviewLaunchPreview,
+} from "./InterviewLaunchClient";
 import IdentityVerificationGate from "@/app/components/identity/IdentityVerificationGate";
 
 export const dynamic = "force-dynamic";
@@ -20,9 +24,21 @@ export default async function InterviewLaunchPage({
   const session = await requireCandidate();
   await connectDB();
   const app = await Candidate.findOne({ _id: id, userId: session.userId })
-    .select("_id jobTitle stage")
+    .select("_id jobId jobTitle stage")
     .lean();
   if (!app) notFound();
+
+  const assessmentConfig = await AssessmentConfig.findOne({ jobId: app.jobId })
+    .select("interview antiCheat")
+    .lean();
+  const preview: InterviewLaunchPreview | null = assessmentConfig
+    ? {
+        durationMinutes: assessmentConfig.interview?.durationMinutes ?? 15,
+        questionCount: assessmentConfig.interview?.questionCount ?? 8,
+        passingScore: assessmentConfig.interview?.passingScore ?? 20,
+        antiCheat: resolveAntiCheat(assessmentConfig.antiCheat),
+      }
+    : null;
 
   // Funnel candidates to where they should actually be.
   if (app.stage === "screening" || app.stage === "quiz_in_progress") {
@@ -60,6 +76,7 @@ export default async function InterviewLaunchPage({
         <InterviewLaunchClient
           applicationId={id}
           alreadyInProgress={app.stage === "interview_in_progress"}
+          preview={preview}
         />
       </IdentityVerificationGate>
     </div>

@@ -6,8 +6,7 @@ import Candidate from "../../../../lib/db/models/Candidate";
 import AssessmentConfig from "../../../../lib/db/models/AssessmentConfig";
 import { runStartInterview } from "../../../../lib/workflow/interviewGraph";
 import { extractResumeText } from "../../../../lib/ai/resumeText";
-import type { InterviewSettings } from "../../../../lib/workflow/interviewState";
-import type { QuestionType } from "../../../../lib/workflow/interviewState";
+import { resolveInterviewSettings } from "../../../../lib/interview/assessmentSettings";
 
 export const dynamic = "force-dynamic";
 
@@ -55,23 +54,7 @@ export async function POST(
   const assessmentConfig = await AssessmentConfig.findOne({ jobId: session.jobId })
     .select("interview")
     .lean();
-  const interviewSettings: InterviewSettings | null = assessmentConfig?.interview
-    ? {
-        durationMinutes: assessmentConfig.interview.durationMinutes ?? 15,
-        questionCount: assessmentConfig.interview.questionCount ?? 8,
-        topics:
-          (assessmentConfig.interview.topics as QuestionType[]) ?? [
-            "introduction",
-            "technical",
-            "scenario",
-            "behavioral",
-          ],
-        difficulty: assessmentConfig.interview.difficulty ?? "medium",
-        passingScore: assessmentConfig.interview.passingScore ?? 20,
-        allowFollowups: assessmentConfig.interview.allowFollowups ?? true,
-        adaptiveDifficulty: assessmentConfig.interview.adaptiveDifficulty ?? true,
-      }
-    : null;
+  const interviewSettings = resolveInterviewSettings(assessmentConfig?.interview);
 
   const result = await runStartInterview({
     candidateId: session.candidateId.toString(),

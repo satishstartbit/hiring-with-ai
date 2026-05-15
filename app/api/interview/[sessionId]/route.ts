@@ -4,6 +4,10 @@ import { connectDB } from "../../../lib/db/connection";
 import InterviewSession from "../../../lib/db/models/InterviewSession";
 import Candidate from "../../../lib/db/models/Candidate";
 import AssessmentConfig from "../../../lib/db/models/AssessmentConfig";
+import {
+  computeInterviewTimeLimitSeconds,
+  resolveAntiCheat,
+} from "../../../lib/interview/assessmentSettings";
 
 export const dynamic = "force-dynamic";
 
@@ -32,16 +36,22 @@ export async function GET(
   const assessmentConfig = await AssessmentConfig.findOne({ jobId: session.jobId })
     .select("antiCheat interview")
     .lean();
-  const antiCheat = {
-    tabSwitchDetection: assessmentConfig?.antiCheat?.tabSwitchDetection ?? true,
-    blockCopyPaste: assessmentConfig?.antiCheat?.blockCopyPaste ?? false,
-    fullscreenRequired: assessmentConfig?.antiCheat?.fullscreenRequired ?? false,
-    webcamMonitoring: assessmentConfig?.antiCheat?.webcamMonitoring ?? false,
-    maxViolations: assessmentConfig?.antiCheat?.maxViolations ?? 3,
-  };
+  const antiCheat = resolveAntiCheat(assessmentConfig?.antiCheat);
+  const durationMinutes = assessmentConfig?.interview?.durationMinutes ?? 15;
+  const timeLimitSeconds = computeInterviewTimeLimitSeconds(
+    durationMinutes,
+    session.status,
+    session.startedAt
+  );
   const interviewConfig = {
-    durationMinutes: assessmentConfig?.interview?.durationMinutes ?? 15,
+    durationMinutes,
+    questionCount: assessmentConfig?.interview?.questionCount ?? 8,
     passingScore: assessmentConfig?.interview?.passingScore ?? 20,
+    topics: assessmentConfig?.interview?.topics ?? [],
+    difficulty: assessmentConfig?.interview?.difficulty ?? "medium",
+    allowFollowups: assessmentConfig?.interview?.allowFollowups ?? true,
+    adaptiveDifficulty: assessmentConfig?.interview?.adaptiveDifficulty ?? true,
+    timeLimitSeconds,
   };
 
   return Response.json({

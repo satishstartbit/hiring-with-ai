@@ -65,7 +65,13 @@ interface SessionAntiCheat {
 
 interface SessionInterviewConfig {
   durationMinutes: number;
+  questionCount: number;
   passingScore: number;
+  timeLimitSeconds: number;
+  topics?: string[];
+  difficulty?: string;
+  allowFollowups?: boolean;
+  adaptiveDifficulty?: boolean;
 }
 
 interface SessionData {
@@ -104,6 +110,18 @@ interface InterviewResult {
 const SILENCE_TIMEOUT_MS = 2500;
 const MIN_WORDS = 10;
 
+const INTERVIEW_ACTIVE_PHASES: Phase[] = [
+  "ai_speaking",
+  "listening",
+  "processing",
+];
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 // Mirrors the quiz round's violation copy so candidates see consistent
 // language across the two assessment stages.
 const VIOLATION_MESSAGES: Record<ProctoringViolation, string> = {
@@ -135,6 +153,8 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   const [session, setSession] = useState<SessionData | null>(null);
   const [currentQIdx, setCurrentQIdx] = useState(0);
   const [totalQuestions, setTotalQuestions] = useState(INTERVIEW_QUESTION_COUNT);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [interviewActive, setInterviewActive] = useState(false);
   const [aiText, setAiText] = useState("");
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -157,6 +177,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
   const accumulatedRef = useRef("");
   // Ref so startListening can call submitAnswer without a circular useCallback dependency
   const submitAnswerRef = useRef<(answer: string) => void>(() => {});
+  const gradeInterviewRef = useRef<() => void>(() => {});
 
   // Proctoring violations — count toward an HR-configured `maxViolations`
   // budget. Each non-fatal violation surfaces a blocking modal; once the
@@ -271,6 +292,20 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       // triggers termination. Each one before that is a warning. Default 1
       // means first violation closes (no warning).
       const limit = session?.antiCheat?.maxViolations ?? 3;
+      // 0 = log warnings only, never force-close (matches HR config hint).
+      if (limit === 0) {
+        fetch(`/api/interview/${sessionId}/violation`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: reason, level: "warning" }),
+        }).catch(() => undefined);
+        setWarningModal({
+          reason,
+          remaining: -1,
+        });
+        return;
+      }
+
       const isTerminating = violationCountRef.current >= limit;
 
       if (isTerminating) {
@@ -324,6 +359,16 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       .then((data: SessionData & { error?: string }) => {
         if (data.error) { setErrorMsg(data.error); setPhase("error"); return; }
         setSession(data);
+        const qCount =
+          data.totalQuestions ||
+          data.interviewConfig?.questionCount ||
+          INTERVIEW_QUESTION_COUNT;
+        setTotalQuestions(qCount);
+        setCurrentQIdx(data.currentQuestionIndex ?? 0);
+        setTimeLeft(data.interviewConfig?.timeLimitSeconds ?? 0);
+        if (data.status === "in_progress") {
+          setInterviewActive(true);
+        }
         if (data.status === "completed") {
           setResult({
             totalScore: data.totalScore ?? 0,
@@ -342,11 +387,29 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           setPhase("error");
           return;
         }
-        // Hand off to the proctoring hook — it will set phase to "permission" → "ready".
-        setPhase("permission");
+        // Hand off to the proctoring hook — camera on → permission → ready;
+        // webcam off → hook jumps straight to ready.
+        setPhase(data.antiCheat?.webcamMonitoring ? "permission" : "ready");
       })
       .catch(() => { setErrorMsg("Failed to load session."); setPhase("error"); });
   }, [sessionId]);
+
+  // Wall-clock timer — driven by HR `interview.durationMinutes`, anchored on
+  // server startedAt so reloads don't reset the budget.
+  useEffect(() => {
+    if (!interviewActive) return;
+    if (!INTERVIEW_ACTIVE_PHASES.includes(phase) && phase !== "grading") return;
+    const timer = window.setInterval(() => {
+      setTimeLeft((t) => {
+        if (t <= 1) {
+          gradeInterviewRef.current();
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [interviewActive, phase]);
 
   // Pulls the live stream off the video element so we can flip track.enabled
   // for the user-facing mute/cam toggles without tearing down the proctoring
@@ -396,6 +459,12 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       setPhase("error");
     }
   }, [sessionId, stopProctoring]);
+
+  useEffect(() => {
+    gradeInterviewRef.current = () => {
+      void gradeInterview();
+    };
+  }, [gradeInterview]);
 
   // ── Speech Recognition ────────────────────────────────────────────────────────
   // Uses submitAnswerRef so it doesn't depend on submitAnswer directly.
@@ -508,6 +577,12 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
 
       setTotalQuestions(data.totalQuestions ?? INTERVIEW_QUESTION_COUNT);
       setCurrentQIdx(data.currentQuestionIndex ?? 0);
+      setInterviewActive(true);
+      // Fresh start gets the full HR budget; rejoin keeps the server-computed
+      // remainder loaded with the session.
+      if (session?.status !== "in_progress") {
+        setTimeLeft((session?.interviewConfig?.durationMinutes ?? 15) * 60);
+      }
       setAiText(data.firstMessage);
       setPhase("ai_speaking");
       speakText(data.firstMessage, () => startListening());
@@ -515,7 +590,7 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
       setErrorMsg("Failed to start interview.");
       setPhase("error");
     }
-  }, [sessionId, speakText, startListening]);
+  }, [sessionId, speakText, startListening, session?.status, session?.interviewConfig?.durationMinutes]);
 
   // ── Toggle cam/mic ────────────────────────────────────────────────────────────
   // NOTE: toggling video.track.enabled freezes the frame which would defeat
@@ -875,6 +950,12 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
     const noFace = faceCount === 0;
     const cameraReady = proctoringStatus === "ready";
     const monitor = proctoringConfig.webcamMonitoring;
+    const cfg = session?.interviewConfig;
+    const minutes = cfg?.durationMinutes ?? 15;
+    const qCount = cfg?.questionCount ?? totalQuestions;
+    const passing = cfg?.passingScore ?? INTERVIEW_PASSING_SCORE;
+    const antiCheat = session?.antiCheat;
+    const isRejoin = session?.status === "in_progress";
 
     return (
       <FullScreen>
@@ -882,8 +963,9 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
           <div>
             <p className="text-2xl font-bold text-white">{session?.jobTitle ?? "AI Interview"}</p>
             <p className="text-sm text-slate-400 mt-1">
-              Hi {session?.candidateName ?? ""} — {totalQuestions} questions, take your time
+              Hi {session?.candidateName ?? ""} — about {minutes} minutes, {qCount} questions
             </p>
+            <p className="text-xs text-slate-500 mt-1">Passing score: {passing}/100</p>
           </div>
 
           {monitor && (
@@ -940,8 +1022,10 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
             ) : (
               <p>✓ Webcam monitoring is disabled for this interview</p>
             )}
-            <p>✓ Speak clearly and naturally — no time limit</p>
+            <p>✓ Speak clearly and naturally when the AI asks a question</p>
           </div>
+
+          <InterviewProctoringRules antiCheat={antiCheat} webcamRequired={monitor} />
 
           {phase === "ready" && (
             <button
@@ -953,7 +1037,11 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
                   : "bg-blue-600 shadow-blue-900/30 hover:bg-blue-500"
               }`}
             >
-              {monitor && tooManyFaces ? "Resolve warning to continue" : "Join Interview →"}
+              {monitor && tooManyFaces
+                ? "Resolve warning to continue"
+                : isRejoin
+                  ? "Rejoin Interview →"
+                  : "Join Interview →"}
             </button>
           )}
         </div>
@@ -979,6 +1067,15 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
         <div className="flex items-center gap-3">
           {proctoringConfig.webcamMonitoring && (
             <ProctoringChip faceCount={faceCount} detectorReady={detectorReady} />
+          )}
+          {interviewActive && timeLeft > 0 && (
+            <span
+              className={`text-xs font-mono tabular-nums ${
+                timeLeft <= 60 ? "text-amber-400" : "text-slate-400"
+              }`}
+            >
+              {formatTime(timeLeft)}
+            </span>
           )}
           <span className="text-xs text-slate-400">
             Question {Math.min(currentQIdx + 1, totalQuestions)} of {totalQuestions}
@@ -1132,11 +1229,13 @@ export default function InterviewRoom({ sessionId }: { sessionId: string }) {
               {VIOLATION_MESSAGES[warningModal.reason]}
             </p>
             <p className="mt-3 text-sm font-semibold text-amber-300">
-              {warningModal.remaining <= 0
-                ? "Your next violation will close the interview."
-                : `${warningModal.remaining} more violation${
-                    warningModal.remaining === 1 ? "" : "s"
-                  } will close the interview and flag your application.`}
+              {warningModal.remaining < 0
+                ? "This violation was logged for recruiter review. The interview will not auto-close."
+                : warningModal.remaining <= 0
+                  ? "Your next violation will close the interview."
+                  : `${warningModal.remaining} more violation${
+                      warningModal.remaining === 1 ? "" : "s"
+                    } will close the interview and flag your application.`}
             </p>
             <button
               type="button"
@@ -1271,6 +1370,53 @@ function FaceCountChip({
       } font-semibold`}
     >
       {ok ? "● 1 person" : count === 0 ? "○ no face" : `⚠ ${count} people`}
+    </div>
+  );
+}
+
+function InterviewProctoringRules({
+  antiCheat,
+  webcamRequired,
+}: {
+  antiCheat?: SessionAntiCheat;
+  webcamRequired: boolean;
+}) {
+  if (!antiCheat) return null;
+  const warnings = Math.max(0, (antiCheat.maxViolations ?? 3) - 1);
+  const hasRules =
+    webcamRequired ||
+    antiCheat.tabSwitchDetection ||
+    antiCheat.fullscreenRequired ||
+    antiCheat.blockCopyPaste ||
+    antiCheat.maxViolations > 0;
+  if (!hasRules) return null;
+
+  return (
+    <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-left text-xs text-slate-300">
+      <p className="mb-2 font-bold text-slate-100">Proctoring rules</p>
+      <ul className="space-y-1.5 list-disc list-inside marker:text-slate-500">
+        {webcamRequired && (
+          <>
+            <li>Camera and microphone stay on for the full interview.</li>
+            <li>Only you should be visible — multiple people triggers a violation.</li>
+          </>
+        )}
+        {antiCheat.tabSwitchDetection && (
+          <li>Do not switch tabs or apps until the interview ends.</li>
+        )}
+        {antiCheat.fullscreenRequired && (
+          <li>Fullscreen is required. Exiting fullscreen counts as a violation.</li>
+        )}
+        {antiCheat.blockCopyPaste && (
+          <li>Copy / paste is disabled during the interview.</li>
+        )}
+        {antiCheat.maxViolations > 0 && (
+          <li>
+            You get <strong>{warnings}</strong> warning{warnings === 1 ? "" : "s"} before the
+            interview auto-closes.
+          </li>
+        )}
+      </ul>
     </div>
   );
 }

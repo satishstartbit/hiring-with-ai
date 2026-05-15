@@ -2,23 +2,41 @@
 
 import { useState } from "react";
 
+export interface InterviewLaunchPreview {
+  durationMinutes: number;
+  questionCount: number;
+  passingScore: number;
+  antiCheat: {
+    tabSwitchDetection: boolean;
+    fullscreenRequired: boolean;
+    blockCopyPaste: boolean;
+    webcamMonitoring: boolean;
+    maxViolations: number;
+  };
+}
+
 interface Props {
   applicationId: string;
   alreadyInProgress: boolean;
-}
-
-interface InterviewStartResponse {
-  interviewSessionId?: string;
-  meetingUrl?: string;
-  error?: string;
+  preview: InterviewLaunchPreview | null;
 }
 
 export default function InterviewLaunchClient({
   applicationId,
   alreadyInProgress,
+  preview,
 }: Readonly<Props>) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const minutes = preview?.durationMinutes ?? 15;
+  const questions = preview?.questionCount ?? 8;
+  const passing = preview?.passingScore ?? 20;
+  const antiCheat = preview?.antiCheat;
+  const warnings =
+    antiCheat && antiCheat.maxViolations > 0
+      ? Math.max(0, antiCheat.maxViolations - 1)
+      : 0;
 
   async function start() {
     if (busy) return;
@@ -29,7 +47,7 @@ export default function InterviewLaunchClient({
         `/api/candidate/applications/${applicationId}/interview`,
         { method: "POST" }
       );
-      const data: InterviewStartResponse = await res.json();
+      const data: { meetingUrl?: string; error?: string } = await res.json();
       if (!res.ok || !data.meetingUrl) {
         setError(data.error ?? "Could not start your interview. Please try again.");
         return;
@@ -45,13 +63,43 @@ export default function InterviewLaunchClient({
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
       <p className="text-sm text-slate-700">
-        The AI interview is conducted in your browser — make sure you’re in a quiet space with a
-        working camera and microphone before you start.
+        The AI interview runs in your browser with voice Q&amp;A. You&apos;ll have about{" "}
+        <strong>{minutes} minutes</strong> for <strong>{questions} questions</strong> (passing
+        score <strong>{passing}/100</strong>).
       </p>
-      <ul className="mt-3 space-y-2 text-sm text-slate-600">
-        <li>· About 10 minutes long, role-specific questions.</li>
+
+      {antiCheat && (
+        <>
+          <h3 className="mt-4 text-sm font-bold text-slate-900">Proctoring rules</h3>
+          <ul className="mt-2 space-y-2 text-sm text-slate-600">
+            {antiCheat.webcamMonitoring && (
+              <>
+                <li>· Camera and microphone stay on for the full interview.</li>
+                <li>· Only you should be visible in the frame.</li>
+              </>
+            )}
+            {antiCheat.tabSwitchDetection && (
+              <li>· Do not switch tabs or apps until the interview ends.</li>
+            )}
+            {antiCheat.fullscreenRequired && (
+              <li>· Fullscreen is required for the entire interview.</li>
+            )}
+            {antiCheat.blockCopyPaste && (
+              <li>· Copy / paste is disabled during the interview.</li>
+            )}
+            {antiCheat.maxViolations > 0 && (
+              <li>
+                · You get <strong>{warnings}</strong> warning{warnings === 1 ? "" : "s"} before
+                the interview auto-closes.
+              </li>
+            )}
+          </ul>
+        </>
+      )}
+
+      <ul className="mt-4 space-y-2 text-sm text-slate-600">
         <li>· You can rejoin mid-interview from your application page.</li>
-        <li>· You don’t need to finish today — your spot stays open.</li>
+        <li>· Speak clearly when the AI asks a question — it listens automatically.</li>
       </ul>
 
       {error && (
@@ -76,9 +124,9 @@ export default function InterviewLaunchClient({
       </div>
 
       {busy && (
-        <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+        <p className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
           We&apos;re creating your AI interview session and getting everything ready for you.
-        </div>
+        </p>
       )}
     </div>
   );

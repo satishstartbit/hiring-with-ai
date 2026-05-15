@@ -16,6 +16,8 @@ const VALID_TYPES: ProctoringViolationType[] = [
   "multi_face",
   "no_face",
   "voice_detected",
+  "fullscreen_exit",
+  "copy_paste",
 ];
 
 interface ViolationBody {
